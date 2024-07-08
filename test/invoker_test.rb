@@ -3,6 +3,37 @@ require_relative 'test_helper'
 require File.join Asciidoctor::LIB_DIR, 'asciidoctor/cli'
 
 context 'Invoker' do
+  test 'should allow Options to be passed as first argument of constructor' do
+    opts = Asciidoctor::Cli::Options.new attributes: { 'toc' => '' }, doctype: 'book', eruby: 'erubis'
+    invoker = Asciidoctor::Cli::Invoker.new opts
+    assert_same invoker.options, opts
+  end
+
+  test 'should allow options Hash to be passed as first argument of constructor' do
+    opts = { attributes: { 'toc' => '' }, doctype: 'book', eruby: 'erubis' }
+    invoker = Asciidoctor::Cli::Invoker.new opts
+    resolved_opts = invoker.options
+    assert_equal opts[:attributes], resolved_opts[:attributes]
+    assert_equal 'book', resolved_opts[:attributes]['doctype']
+    assert_equal 'erubis', resolved_opts[:eruby]
+  end
+
+  test 'should parse options from array passed as first argument of constructor' do
+    input_file = fixture_path 'basic.adoc'
+    invoker = Asciidoctor::Cli::Invoker.new ['-s', input_file]
+    resolved_options = invoker.options
+    refute resolved_options[:standalone]
+    assert_equal [input_file], resolved_options[:input_files]
+  end
+
+  test 'should parse options from multiple arguments passed to constructor' do
+    input_file = fixture_path 'basic.adoc'
+    invoker = Asciidoctor::Cli::Invoker.new '-s', input_file
+    resolved_options = invoker.options
+    refute resolved_options[:standalone]
+    assert_equal [input_file], resolved_options[:input_files]
+  end
+
   test 'should parse source and convert to html5 article by default' do
     invoker = nil
     output = nil
@@ -585,7 +616,7 @@ context 'Invoker' do
     assert_kind_of Asciidoctor::Converter::CompositeConverter, doc.converter
     selected = doc.converter.find_converter 'paragraph'
     assert_kind_of Asciidoctor::Converter::TemplateConverter, selected
-    assert_kind_of Tilt::HamlTemplate, selected.templates['paragraph']
+    assert_kind_of haml_template_class, selected.templates['paragraph']
   end
 
   test 'should load custom templates from multiple template directories' do
@@ -703,7 +734,7 @@ context 'Invoker' do
     assert_include '<p>IBM866:IBM866</p>', result
   end
 
-  test 'should not fail to load if call to Dir.home fails' do
+  test 'should not fail to load if call to Dir.home fails', unless: RUBY_ENGINE == 'truffleruby' do
     cmd = asciidoctor_cmd ['-r', (fixture_path 'undef-dir-home.rb')]
     result = run_command(cmd, '-e', '-o', '-', (fixture_path 'basic.adoc')) {|out| out.read }
     assert_include 'Body content', result

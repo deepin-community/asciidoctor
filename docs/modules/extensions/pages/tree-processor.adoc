@@ -1,10 +1,21 @@
-= Tree Processor Extension Example
+= Tree Processor Extension
 :navtitle: Tree Processor
+
+A {url-api-gems}/asciidoctor/{release-version}/Asciidoctor/Extensions/TreeProcessor[TreeProcessor^] extension is run on the Document instance after the blocks in the source have been parsed into a document structure, as represented by the Document object and its child AbstractNode objects (e.g., Section, Block, List, ListItem).
+
+Asciidoctor invokes the `Processor#process` method on an instance of each registered TreeProcessor extension.
+
+IMPORTANT: A TreeProcessor extension is run before any inline markup is interpreted.
+At the time the process method on the TreeProcessor extension is invoked, the block nodes in the document have unprocessed, unconverted text.
+Conversion of inline markup is done when the document is being converted.
+Thus, it's possible for the TreeProcessor extension to replace the source text on the nodes, but it must consider the fact that the text is still going to be parsed (according to the content model of the block).
+
+== Tree Processor Extension Example
 
 Purpose::
 Detect literal blocks that contain shell commands, strip the prompt character and style the command using CSS in such a way that the prompt character cannot be selected (as seen on help.github.com).
 
-== sample-with-shell-session.adoc
+=== sample-with-shell-session.adoc
 
 [source,asciidoc]
 ----
@@ -14,50 +25,40 @@ Detect literal blocks that contain shell commands, strip the prompt character an
  $ gem install asciidoctor
 ----
 
-== ShellSessionTreeProcessor
+=== ShellSessionTreeProcessor
 
 [source,ruby]
 ----
 class ShellSessionTreeProcessor < Asciidoctor::Extensions::TreeProcessor
-  def process document
-    return unless document.blocks?
-    process_blocks document
-    nil
-  end
+  LF = ?\n
 
-  def process_blocks node
-    node.blocks.each_with_index do |block, i|
-      if block.context == :literal &&
-          (((first_line = block.lines.first).start_with? '$ ') ||
-            (first_line.start_with? '> '))
-        node.blocks[i] = convert_to_terminal_listing block
-      else
-        process_blocks block if block.blocks?
-      end
+  def process document
+    (document.find_by(context: :literal) {|candidate| candidate.lines[0].start_with? '$ ', '> ' }).each do |block|
+      (children = block.parent.blocks)[children.index block] = convert_to_terminal_listing block
     end
+    nil
   end
 
   def convert_to_terminal_listing block
     attrs = block.attributes
     attrs['role'] = 'terminal'
-    prompt_attr = (attrs.has_key? 'prompt') ?
-        %( data-prompt="#{block.sub_specialchars attrs['prompt']}") : nil
-    lines = block.lines.map do |line|
-      line = block.sub_specialchars line.chomp
+    prompt_attr = (attrs.key? 'prompt') ? %( data-prompt="#{block.sub_specialchars attrs['prompt']}") : nil
+    lines = (block.content.split LF).map do |line|
       if line.start_with? '$ '
         %(<span class="command"#{prompt_attr}>#{line[2..-1]}</span>)
       elsif line.start_with? '&gt; '
         %(<span class="output">#{line[5..-1]}</span>)
+        #%(<span class="output"><span class="comment-prefix"># </span>#{line[5..-1]}</span>)
       else
         line
       end
     end
-    create_listing_block block.document, lines * EOL, attrs, subs: nil
+    create_listing_block block.parent, lines * LF, attrs, subs: nil
   end
 end
 ----
 
-== Usage
+=== Usage
 
 [source,ruby]
 ----
@@ -67,20 +68,3 @@ end
 
 Asciidoctor.convert_file 'sample-with-shell-session.adoc', safe: :safe
 ----
-
-////
-In the example below the TreeProcessor examines the block contents looking for the `// (*)` suffix and rewrites the line so that Asciidoctor formats it appropriately.
-
-[source,java]
-----
-protected void configure(HttpSecurity http) throws Exception {
-    http
-        .authorizeRequests()
-            .antMatchers("/resources/**").permitAll() // (*)
-            .anyRequest().authenticated()
-            .and()
-        .formLogin()
-            .loginPage("/login")
-            .permitAll();
-----
-////

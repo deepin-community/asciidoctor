@@ -85,7 +85,11 @@ module Asciidoctor
               'this attribute takes precedence over the same attribute defined in the source document',
               'unless either the name or value ends in @ (i.e., name@=value or name=value@)') do |attr|
             next if (attr = attr.rstrip).empty? || attr == '='
-            attr = attr.encode UTF_8 unless attr.encoding == UTF_8
+            begin
+              attr = attr.encode UTF_8
+            rescue ::EncodingError
+              attr = attr.force_encoding UTF_8
+            end unless attr.encoding == UTF_8
             name, _, val = attr.partition '='
             self[:attributes][name] = val
           end
@@ -119,7 +123,7 @@ module Asciidoctor
               'may be specified more than once') do |path|
             (self[:requires] ||= []).concat(path.split ',')
           end
-          opts.on('--failure-level LEVEL', %w(warning WARNING error ERROR info INFO), 'set minimum logging level that triggers non-zero exit code: [WARN, ERROR, INFO] (default: FATAL)') do |level|
+          opts.on('--failure-level LEVEL', %w(info INFO warning WARNING error ERROR fatal FATAL), 'set minimum log level that yields a non-zero exit code: [INFO, WARN, ERROR, FATAL] (default: FATAL)') do |level|
             level = 'WARN' if (level = level.upcase) == 'WARNING'
             self[:failure_level] = ::Logger::Severity.const_get level
           end
@@ -258,7 +262,7 @@ module Asciidoctor
             raise $! if self[:trace]
             $stderr.puts 'asciidoctor: FAILED: \'tilt\' could not be loaded'
             $stderr.puts '  You must have the tilt gem installed (gem install tilt) to use custom backend templates'
-            $stderr.puts '  Use --trace for backtrace'
+            $stderr.puts '  Use --trace to show backtrace'
             return 1
           rescue ::SystemExit
             # not permitted here
@@ -278,7 +282,7 @@ module Asciidoctor
             rescue ::LoadError
               raise $! if self[:trace]
               $stderr.puts %(asciidoctor: FAILED: '#{path}' could not be loaded)
-              $stderr.puts '  Use --trace for backtrace'
+              $stderr.puts '  Use --trace to show backtrace'
               return 1
             rescue ::SystemExit
               # not permitted here

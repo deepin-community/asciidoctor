@@ -145,6 +145,10 @@ class ReaderTest < Minitest::Test
         assert reader.next_line_empty?
       end
 
+      test 'peek_line should return nil if next entry is nil' do
+        assert_nil (Asciidoctor::Reader.new [nil]).peek_line
+      end
+
       test 'peek_line should return next line if there are lines remaining' do
         reader = Asciidoctor::Reader.new SAMPLE_DATA
         assert_equal SAMPLE_DATA.first, reader.peek_line
@@ -511,6 +515,25 @@ class ReaderTest < Minitest::Test
         reader = doc.reader
         refute doc.attributes.key?('front-matter')
         assert_equal '---', reader.peek_line
+        assert_equal 1, reader.lineno
+      end
+
+      test 'should not skip front matter if ending delimiter is not found' do
+        input = <<~'EOS'
+        ---
+        title: Document Title
+        tags: [ first, second ]
+        = Document Title
+        Author Name
+
+        preamble
+        EOS
+
+        doc = Asciidoctor::Document.new input, attributes: { 'skip-front-matter' => '' }
+        reader = doc.reader
+        assert_equal '---', reader.peek_line
+        refute doc.attributes.key? 'front-matter'
+        assert_equal 1, reader.lineno
       end
 
       test 'should skip front matter if specified by skip-front-matter attribute' do
@@ -535,6 +558,7 @@ class ReaderTest < Minitest::Test
         reader = doc.reader
         assert_equal '= Document Title', reader.peek_line
         assert_equal front_matter, doc.attributes['front-matter']
+        assert_equal 7, reader.lineno
       end
     end
 
@@ -621,11 +645,21 @@ class ReaderTest < Minitest::Test
     end
 
     context 'Include Directive' do
-      test 'include directive is disabled by default and becomes a link' do
+      test 'should replace include directive with link macro in default safe mode' do
         input = 'include::include-file.adoc[]'
         doc = Asciidoctor::Document.new input
         reader = doc.reader
-        assert_equal 'link:include-file.adoc[]', reader.read_line
+        assert_equal 'link:include-file.adoc[role=include]', reader.read_line
+      end
+
+      test 'should replace include directive with link macro if safe mode allows it, but allow-uri-read is not set' do
+        using_memory_logger do |logger|
+          input = 'include::https://example.org/dist/info.adoc[]'
+          doc = Asciidoctor::Document.new input, safe: :safe
+          reader = doc.reader
+          assert_equal 'link:https://example.org/dist/info.adoc[role=include]', reader.read_line
+          assert_empty logger
+        end
       end
 
       test 'include directive is enabled when safe mode is less than SECURE' do
@@ -642,6 +676,15 @@ class ReaderTest < Minitest::Test
         assert_css '.paragraph', output, 0
         assert_css 'h1', output, 1
         assert_match(/<h1>人<\/h1>/, output)
+      end
+
+      test 'should include content from a file on the classloader', if: jruby? do
+        require fixture_path 'assets.jar'
+        input = 'include::uri:classloader:/includes-in-jar/include-file.adoc[]'
+        doc = document_from_string input, safe: :unsafe, standalone: false, base_dir: DIRNAME
+        output = doc.convert
+        assert_match(/included from a file/, output)
+        assert doc.catalog[:includes]['uri:classloader:/includes-in-jar/include-file']
       end
 
       test 'should not track include in catalog for non-AsciiDoc include files' do
@@ -683,9 +726,32 @@ class ReaderTest < Minitest::Test
         end
       end
 
+      test 'include directive should not match if target is empty or starts or ends with space' do
+        ['include::[]', 'include:: []', 'include:: not-include[]', 'include::not-include []'].each do |input|
+          doc = Asciidoctor::Document.new input
+          reader = doc.reader
+          assert_equal input, reader.read_line
+        end
+      end
+
+      test 'include directive should not attempt to resolve target as remote if allow-uri-read is set and URL is not on first line' do
+        using_memory_logger do |logger|
+          input = <<~'EOS'
+          :target: not-a-file.adoc + \
+          http://example.org/team.adoc
+
+          include::{target}[]
+          EOS
+          doc = Asciidoctor.load input, safe: :safe, base_dir: fixturedir
+          lines = doc.blocks[0].lines
+          assert_equal [%(Unresolved directive in <stdin> - include::not-a-file.adoc +\nhttp://example.org/team.adoc[])], lines
+          assert_message logger, :ERROR, %(<stdin>: line 4: include file not found: #{fixture_path 'not-a-file.adoc'} +\nhttp://example.org/team.adoc), Hash
+        end
+      end
+
       test 'include directive should resolve file relative to current include' do
         input = 'include::fixtures/parent-include.adoc[]'
-        pseudo_docfile = File.join DIRNAME, 'include-master.adoc'
+        pseudo_docfile = File.join DIRNAME, 'main.adoc'
         fixtures_dir = File.join DIRNAME, 'fixtures'
         parent_include_docfile = File.join fixtures_dir, 'parent-include.adoc'
         child_include_docfile = File.join fixtures_dir, 'child-include.adoc'
@@ -696,7 +762,7 @@ class ReaderTest < Minitest::Test
 
         assert_equal pseudo_docfile, reader.file
         assert_equal DIRNAME, reader.dir
-        assert_equal 'include-master.adoc', reader.path
+        assert_equal 'main.adoc', reader.path
 
         assert_equal 'first line of parent', reader.read_line
 
@@ -1521,7 +1587,7 @@ class ReaderTest < Minitest::Test
         assert_includes output, %(<pre>#{expected}</pre>)
       end
 
-      test 'include directive skips all tagged regions except ones reenabled when value of tags attribute is negated wildcard followed by tag name' do
+      test 'include directive skips all tagged regions except ones re-enabled when value of tags attribute is negated wildcard followed by tag name' do
         ['!*;init', '**;!*;init'].each do |pattern|
           input = <<~EOS
           ----
@@ -1658,6 +1724,34 @@ class ReaderTest < Minitest::Test
         end
       end
 
+      test 'should not warn if specified negated tag is not found in include file' do
+        input = <<~'EOS'
+        ----
+        include::fixtures/tagged-class-enclosed.rb[tag=!no-such-tag]
+        ----
+        EOS
+        expected = <<~EOS.chop
+        class Dog
+          def initialize breed
+            @breed = breed
+          end
+
+          def bark
+            if @breed == 'beagle'
+              'woof woof woof woof woof'
+            else
+              'woof woof'
+            end
+          end
+        end
+        EOS
+        using_memory_logger do |logger|
+          output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
+          assert_includes output, %(<pre>#{expected}</pre>)
+          assert_empty logger.messages
+        end
+      end
+
       test 'should warn if specified tags are not found in include file' do
         input = <<~'EOS'
         ++++
@@ -1669,6 +1763,34 @@ class ReaderTest < Minitest::Test
           convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
           expected_tags = 'no-such-tag-b, no-such-tag-a'
           assert_message logger, :WARN, %(~<stdin>: line 2: tags '#{expected_tags}' not found in include file), Hash
+        end
+      end
+
+      test 'should not warn if specified negated tags are not found in include file' do
+        input = <<~'EOS'
+        ----
+        include::fixtures/tagged-class-enclosed.rb[tags=all;!no-such-tag;!unknown-tag]
+        ----
+        EOS
+        expected = <<~EOS.chop
+        class Dog
+          def initialize breed
+            @breed = breed
+          end
+
+          def bark
+            if @breed == 'beagle'
+              'woof woof woof woof woof'
+            else
+              'woof woof'
+            end
+          end
+        end
+        EOS
+        using_memory_logger do |logger|
+          output = convert_string_to_embedded input, safe: :safe, base_dir: DIRNAME
+          assert_includes output, %(<pre>#{expected}</pre>)
+          assert_empty logger.messages
         end
       end
 
@@ -1789,9 +1911,9 @@ class ReaderTest < Minitest::Test
       end
 
       test 'leveloffset attribute entries should be added to content if leveloffset attribute is specified' do
-        input = 'include::fixtures/master.adoc[]'
+        input = 'include::fixtures/main.adoc[]'
         expected = <<~'EOS'.split ::Asciidoctor::LF
-        = Master Document
+        = Main Document
 
         preamble
 
@@ -1911,7 +2033,7 @@ class ReaderTest < Minitest::Test
       test 'include directive should be disabled if max include depth has been exceeded' do
         input = 'include::fixtures/parent-include.adoc[depth=1]'
         using_memory_logger do |logger|
-          pseudo_docfile = File.join DIRNAME, 'include-master.adoc'
+          pseudo_docfile = File.join DIRNAME, 'main.adoc'
           doc = empty_safe_document base_dir: DIRNAME
           reader = Asciidoctor::PreprocessorReader.new doc, input, Asciidoctor::Reader::Cursor.new(pseudo_docfile), normalize: true
           lines = reader.readlines
@@ -1923,7 +2045,7 @@ class ReaderTest < Minitest::Test
       test 'include directive should be disabled if max include depth set in nested context has been exceeded' do
         input = 'include::fixtures/parent-include-restricted.adoc[depth=3]'
         using_memory_logger do |logger|
-          pseudo_docfile = File.join DIRNAME, 'include-master.adoc'
+          pseudo_docfile = File.join DIRNAME, 'main.adoc'
           doc = empty_safe_document base_dir: DIRNAME
           reader = Asciidoctor::PreprocessorReader.new doc, input, Asciidoctor::Reader::Cursor.new(pseudo_docfile), normalize: true
           lines = reader.readlines
@@ -2731,6 +2853,39 @@ class ReaderTest < Minitest::Test
           assert_empty result
           assert_empty logger
         end
+      end
+
+      test 'should not fail to process preprocessor directive that evaluates to false and has a large number of lines' do
+        lines = (%w(data) * 5000) * ?\n
+        input = <<~EOS
+        before
+
+        ifdef::attribute-not-set[]
+        #{lines}
+        endif::attribute-not-set[]
+
+        after
+        EOS
+
+        doc = Asciidoctor.load input
+        assert_equal 2, doc.blocks.size
+        assert_equal 'before', doc.blocks[0].source
+        assert_equal 'after', doc.blocks[1].source
+      end
+
+      test 'should not fail to process lines if reader contains a nil entry' do
+        input = ['before', '', '', '', 'after']
+        doc = Asciidoctor.load input, extensions: proc {
+          preprocessor do
+            process do |_, reader|
+              reader.source_lines[2] = nil
+              nil
+            end
+          end
+        }
+        assert_equal 2, doc.blocks.size
+        assert_equal 'before', doc.blocks[0].source
+        assert_equal 'after', doc.blocks[1].source
       end
     end
   end

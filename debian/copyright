@@ -10,7 +10,7 @@ License: Expat
 Files: debian/*
 Copyright: 2013-2014 Per Andersson <avtobiff@gmail.com>
            2013 Jérémy Bobbio <lunar@debian.org>
-           2021 Debian Ruby Extras Maintainers <pkg-ruby-extras-maintainers@lists.alioth.debian.org>
+           2021-2023 Debian Ruby Extras Maintainers <pkg-ruby-extras-maintainers@lists.alioth.debian.org>
 License: Expat
 
 License: Expat

@@ -209,6 +209,11 @@ context 'Links' do
     assert_include '"<a href="https://asciidoctor.org" class="bare">https://asciidoctor.org</a>"', output
   end
 
+  test 'should convert qualified url as macro with trailing period' do
+    result = convert_string_to_embedded 'Information about the https://symbols.example.org/.[.] character.'
+    assert_xpath '//a[@href="https://symbols.example.org/."][text()="."]', result, 1
+  end
+
   test 'should convert qualified url as macro enclosed in single quotes' do
     output = convert_string_to_embedded('\'https://asciidoctor.org[]\'')
     assert_include '\'<a href="https://asciidoctor.org" class="bare">https://asciidoctor.org</a>\'', output
@@ -220,6 +225,12 @@ context 'Links' do
 
   test 'escaped inline qualified url should not create link' do
     assert_xpath '//a', convert_string('\http://asciidoc.org is the project page for AsciiDoc.'), 0
+  end
+
+  test 'escaped inline qualified url as macro should not create link' do
+    output = convert_string '\http://asciidoc.org[asciidoc.org] is the project page for AsciiDoc.'
+    assert_xpath '//a', output, 0
+    assert_xpath '//p[starts-with(text(), "http://asciidoc.org[asciidoc.org]")]', output, 1
   end
 
   test 'url in link macro with at (@) sign should not create mailto link' do
@@ -375,6 +386,24 @@ context 'Links' do
     output = convert_string_to_embedded input
     assert_includes output, '[[1-install]]'
     assert_xpath '//a[@id = "1-install"]', output, 0
+  end
+
+  test 'reftext of shorthand inline ref cannot resolve to empty' do
+    input = '[[no-such-id,{empty}]]text'
+    doc = document_from_string input
+    assert_empty doc.catalog[:refs]
+    output = doc.convert standalone: false
+    assert_includes output, (input.sub '{empty}', '')
+  end
+
+  test 'reftext of macro inline ref can resolve to empty' do
+    input = 'anchor:id-only[{empty}]text\n\nsee <<id-only>>'
+    doc = document_from_string input
+    assert doc.catalog[:refs].key? 'id-only'
+    output = doc.convert standalone: false
+    assert_xpath '//a[@id="id-only"]', output, 1
+    assert_xpath '//a[@href="#id-only"]', output, 1
+    assert_xpath '//a[@href="#id-only"][text()="[id-only]"]', output, 1
   end
 
   test 'inline ref with reftext' do
@@ -937,6 +966,30 @@ context 'Links' do
     assert_xpath '//a[@href="other-chapters.html#ch2"][text()="the next chapter"]', output, 1
   end
 
+  test 'should produce an internal anchor for inter-document xref to file included fully and partially' do
+    input = <<~'EOS'
+    = Book Title
+    :doctype: book
+
+    [#ch1]
+    == Chapter 1
+
+    So it begins.
+
+    Read <<other-chapters.adoc#ch2,the next chapter>> to find out what happens next!
+
+    include::other-chapters.adoc[]
+
+    include::other-chapters.adoc[tag=ch2-noid]
+    EOS
+
+    doc = document_from_string input, safe: :safe, base_dir: fixturedir
+    assert doc.catalog[:includes].key?('other-chapters')
+    assert doc.catalog[:includes]['other-chapters']
+    output = doc.convert
+    assert_xpath '//a[@href="#ch2"][text()="the next chapter"]', output, 1
+  end
+
   test 'should warn and create link if debug mode is enabled, inter-document xref points to current doc, and reference not found' do
     input = <<~'EOS'
     [#foobar]
@@ -1183,6 +1236,25 @@ context 'Links' do
     output = convert_string_to_embedded input
     assert_xpath '//a[@href="#s1"]', output, 1
     assert_xpath '//a[@href="#s1"][text()="Section Title"]', output, 1
+  end
+
+  test 'should not match numeric character references while searching for fragment in xref target' do
+    input = <<~'EOS'
+    see <<Cub => Tiger>>
+
+    == Cub => Tiger
+    EOS
+    output = convert_string_to_embedded input
+    assert_xpath '//a[@href="#_cub_tiger"]', output, 1
+    assert_xpath %(//a[@href="#_cub_tiger"][text()="Cub #{decode_char 8658} Tiger"]), output, 1
+  end
+
+  test 'should not match numeric character references in path of interdocument xref' do
+    input = <<~'EOS'
+    see xref:{cpp}[{cpp}].
+    EOS
+    output = convert_string_to_embedded input
+    assert_includes output, '<a href="#C&#43;&#43;">C&#43;&#43;</a>'
   end
 
   test 'anchor creates reference' do

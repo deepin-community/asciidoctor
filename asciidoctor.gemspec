@@ -17,8 +17,8 @@ Gem::Specification.new do |s|
   #s.required_ruby_version = '>= 2.3.0'
   s.metadata = {
     'bug_tracker_uri' => 'https://github.com/asciidoctor/asciidoctor/issues',
-    'changelog_uri' => 'https://github.com/asciidoctor/asciidoctor/blob/master/CHANGELOG.adoc',
-    'mailing_list_uri' => 'http://discuss.asciidoctor.org',
+    'changelog_uri' => 'https://github.com/asciidoctor/asciidoctor/blob/HEAD/CHANGELOG.adoc',
+    'mailing_list_uri' => 'https://chat.asciidoctor.org',
     'source_code_uri' => 'https://github.com/asciidoctor/asciidoctor'
   }
 
@@ -38,9 +38,9 @@ Gem::Specification.new do |s|
   s.add_development_dependency 'cucumber', '~> 3.1.0'
   # erubi is needed for testing alternate eRuby impls
   s.add_development_dependency 'erubi', '~> 1.10.0'
-  s.add_development_dependency 'haml', '~> 5.2.0'
+  s.add_development_dependency 'haml', '~> 6.1.0'
   s.add_development_dependency 'minitest', '~> 5.14.0'
-  s.add_development_dependency 'nokogiri', '~> 1.10.0'
+  s.add_development_dependency 'nokogiri', '~> 1.13.0'
   s.add_development_dependency 'rake', '~> 12.3.0'
   s.add_development_dependency 'slim', '~> 4.1.0'
   s.add_development_dependency 'tilt', '~> 2.0.0'

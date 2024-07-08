@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 module Asciidoctor
 # Public: Methods to perform substitutions on lines of AsciiDoc text. This module
-# is intented to be mixed-in to Section and Block to provide operations for performing
+# is intended to be mixed-in to Section and Block to provide operations for performing
 # the necessary substitutions.
 module Substitutors
   SpecialCharsRx = /[<&>]/
@@ -526,9 +526,9 @@ module Substitutors
     if found_colon && (text.include? '://')
       # inline urls, target[text] (optionally prefixed with link: and optionally surrounded by <>)
       text = text.gsub InlineLinkRx do
-        if (target = $2).start_with? RS
+        if (target = $2 + ($3 || $5)).start_with? RS
           # honor the escape
-          next %(#{$1}#{target.slice 1, target.length}#{$4})
+          next ($&.slice 0, (rs_idx = $1.length)) + ($&.slice rs_idx + 1, $&.length)
         end
 
         prefix, suffix = $1, ''
@@ -543,15 +543,7 @@ module Substitutors
           when 'link:', ?", ?'
             next $&
           end
-          case $3
-          when ')', '?', '!'
-            target = target.chop
-            if (suffix = $3) == ')' && (target.end_with? '.', '?', '!')
-              suffix = target[-1] + suffix
-              target = target.chop
-            end
-            # NOTE handle case when modified target is a URI scheme (e.g., http://)
-            next $& if target.end_with? '://'
+          case $6
           when ';'
             if (prefix.start_with? '&lt;') && (target.end_with? '&gt;')
               # move surrounding <> out of URL
@@ -755,7 +747,7 @@ module Substitutors
 
         if doc.compat_mode
           fragment = refid
-        elsif (hash_idx = refid.index '#')
+        elsif (hash_idx = refid.index '#') && refid[hash_idx - 1] != '&'
           if hash_idx > 0
             if (fragment_len = refid.length - 1 - hash_idx) > 0
               path, fragment = (refid.slice 0, hash_idx), (refid.slice hash_idx + 1, fragment_len)
@@ -940,7 +932,7 @@ module Substitutors
   # process_callouts - a Boolean flag indicating whether callout marks should be located and substituted
   #
   # Returns the highlighted source code, if a syntax highlighter is defined on the document, otherwise the source with
-  # verbatim substituions applied
+  # verbatim substitutions applied
   def highlight_source source, process_callouts
     # NOTE the call to highlight? is a defensive check since, normally, we wouldn't arrive here unless it returns true
     return sub_source source, process_callouts unless (syntax_hl = @document.syntax_highlighter) && syntax_hl.highlight?
@@ -1010,7 +1002,7 @@ module Substitutors
 
   # Public: Extract the passthrough text from the document for reinsertion after processing.
   #
-  # text - The String from which to extract passthrough fragements
+  # text - The String from which to extract passthrough fragments
   #
   # Returns the String text with passthrough regions substituted with placeholders
   def extract_passthroughs text
@@ -1027,11 +1019,17 @@ module Substitutors
             next %(#{$1}[#{attrlist}]#{RS * (escape_count - 1)}#{boundary}#{$5}#{boundary})
           elsif $1 == RS
             preceding = %([#{attrlist}])
-          else
-            if boundary == '++' && (attrlist.end_with? 'x-')
+          elsif boundary == '++'
+            if attrlist == 'x-'
               old_behavior = true
-              attrlist = attrlist.slice 0, attrlist.length - 2
+              attributes = {}
+            elsif attrlist.end_with? ' x-'
+              old_behavior = true
+              attributes = parse_quoted_text_attributes attrlist.slice 0, attrlist.length - 3
+            else
+              attributes = parse_quoted_text_attributes attrlist
             end
+          else
             attributes = parse_quoted_text_attributes attrlist
           end
         elsif (escape_count = $3.length) > 0
@@ -1066,41 +1064,43 @@ module Substitutors
     pass_inline_char1, pass_inline_char2, pass_inline_rx = InlinePassRx[compat_mode]
     text = text.gsub pass_inline_rx do
       preceding = $1
-      attrlist = $2
-      escape_mark = RS if (quoted_text = $3).start_with? RS
-      format_mark = $4
-      content = $5
+      attrlist = $4 || $3
+      escaped = true if $5
+      quoted_text = $6
+      format_mark = $7
+      content = $8
 
       if compat_mode
         old_behavior = true
-      elsif (old_behavior = attrlist && (attrlist.end_with? 'x-'))
-        attrlist = attrlist.slice 0, attrlist.length - 2
+      elsif attrlist && (attrlist == 'x-' || (attrlist.end_with? ' x-'))
+        old_behavior = old_behavior_forced = true
       end
 
       if attrlist
-        if format_mark == '`' && !old_behavior
-          next extract_inner_passthrough content, %(#{preceding}[#{attrlist}]#{escape_mark})
-        elsif escape_mark
+        if escaped
           # honor the escape of the formatting mark
           next %(#{preceding}[#{attrlist}]#{quoted_text.slice 1, quoted_text.length})
         elsif preceding == RS
           # honor the escape of the attributes
+          next %(#{preceding}[#{attrlist}]#{quoted_text}) if old_behavior_forced && format_mark == '`'
           preceding = %([#{attrlist}])
+        elsif old_behavior_forced
+          attributes = attrlist == 'x-' ? {} : (parse_quoted_text_attributes attrlist.slice 0, attrlist.length - 3)
         else
           attributes = parse_quoted_text_attributes attrlist
         end
-      elsif format_mark == '`' && !old_behavior
-        next extract_inner_passthrough content, %(#{preceding}#{escape_mark})
-      elsif escape_mark
+      elsif escaped
         # honor the escape of the formatting mark
         next %(#{preceding}#{quoted_text.slice 1, quoted_text.length})
+      elsif compat_mode && preceding == RS
+        next quoted_text
       end
 
       if compat_mode
         passthrus[passthru_key = passthrus.size] = { text: content, subs: BASIC_SUBS, attributes: attributes, type: :monospaced }
       elsif attributes
         if old_behavior
-          subs = (format_mark == '`' ? BASIC_SUBS : NORMAL_SUBS)
+          subs = format_mark == '`' ? BASIC_SUBS : NORMAL_SUBS
           passthrus[passthru_key = passthrus.size] = { text: content, subs: subs, attributes: attributes, type: :monospaced }
         else
           passthrus[passthru_key = passthrus.size] = { text: content, subs: BASIC_SUBS, attributes: attributes, type: :unquoted }
@@ -1217,7 +1217,7 @@ module Substitutors
       end
     end
     return unless candidates
-    # weed out invalid options and remove duplicates (order is preserved; first occurence wins)
+    # weed out invalid options and remove duplicates (order is preserved; first occurrence wins)
     resolved = candidates & SUB_OPTIONS[type]
     unless (candidates - resolved).empty?
       invalid = candidates - resolved
@@ -1397,20 +1397,6 @@ module Substitutors
         line
       end
     end.join LF)
-  end
-
-  # Internal: Extract nested single-plus passthrough; otherwise return unprocessed
-  def extract_inner_passthrough text, pre
-    if (text.end_with? '+') && (text.start_with? '+', '\+') && SinglePlusInlinePassRx =~ text
-      if $1
-        %(#{pre}`+#{$2}+`)
-      else
-        @passthroughs[passthru_key = @passthroughs.size] = { text: $2, subs: BASIC_SUBS }
-        %(#{pre}`#{PASS_START}#{passthru_key}#{PASS_END}`)
-      end
-    else
-      %(#{pre}`#{text}`)
-    end
   end
 
   # Internal: Convert a quoted text region

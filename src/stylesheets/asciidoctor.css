@@ -446,22 +446,22 @@ ul li ol {
   margin-bottom: 0;
 }
 
-ul.square li ul,
-ul.circle li ul,
-ul.disc li ul {
-  list-style: inherit;
-}
-
-ul.square {
-  list-style-type: square;
-}
-
 ul.circle {
   list-style-type: circle;
 }
 
 ul.disc {
   list-style-type: disc;
+}
+
+ul.square {
+  list-style-type: square;
+}
+
+ul.circle ul:not([class]),
+ul.disc ul:not([class]),
+ul.square ul:not([class]) {
+  list-style: inherit;
 }
 
 ol li ul,
@@ -1128,7 +1128,12 @@ details > summary {
   position: relative;
   line-height: 1.6;
   margin-bottom: 0.625rem;
+  outline: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
 }
 
 details > summary::before {
@@ -1237,14 +1242,6 @@ table.tableblock.fit-content > caption.title {
   border-radius: 4px;
 }
 
-.exampleblock > .content > :first-child {
-  margin-top: 0;
-}
-
-.exampleblock > .content > :last-child {
-  margin-bottom: 0;
-}
-
 .sidebarblock {
   border: 1px solid #dbdbd6;
   margin-bottom: 1.25em;
@@ -1253,24 +1250,23 @@ table.tableblock.fit-content > caption.title {
   border-radius: 4px;
 }
 
-.sidebarblock > :first-child {
-  margin-top: 0;
-}
-
-.sidebarblock > :last-child {
-  margin-bottom: 0;
-}
-
 .sidebarblock > .content > .title {
   color: #7a2518;
   margin-top: 0;
   text-align: center;
 }
 
+.exampleblock > .content > :first-child,
+.sidebarblock > .content > :first-child {
+  margin-top: 0;
+}
+
+.exampleblock > .content > :last-child,
 .exampleblock > .content > :last-child > :last-child,
 .exampleblock > .content .olist > ol > li:last-child > :last-child,
 .exampleblock > .content .ulist > ul > li:last-child > :last-child,
 .exampleblock > .content .qlist > ol > li:last-child > :last-child,
+.sidebarblock > .content > :last-child,
 .sidebarblock > .content > :last-child > :last-child,
 .sidebarblock > .content .olist > ol > li:last-child > :last-child,
 .sidebarblock > .content .ulist > ul > li:last-child > :last-child,
@@ -1399,22 +1395,17 @@ table.linenotable td.code {
   padding-left: 0.75em;
 }
 
-table.linenotable td.linenos {
+table.linenotable td.linenos,
+pre.pygments .linenos {
   border-right: 1px solid;
   opacity: 0.35;
   padding-right: 0.5em;
+  user-select: none;
 }
 
-pre.pygments .lineno {
-  border-right: 1px solid;
-  opacity: 0.35;
+pre.pygments span.linenos {
   display: inline-block;
   margin-right: 0.75em;
-}
-
-pre.pygments .lineno::before {
-  content: "";
-  margin-right: -0.125em;
 }
 
 .quoteblock {
@@ -1622,10 +1613,10 @@ table.frame-ends > * > tr > :last-child {
   border-right-width: 0;
 }
 
-table.stripes-all tr,
-table.stripes-odd tr:nth-of-type(odd),
-table.stripes-even tr:nth-of-type(even),
-table.stripes-hover tr:hover {
+table.stripes-all > * > tr,
+table.stripes-odd > * > tr:nth-of-type(odd),
+table.stripes-even > * > tr:nth-of-type(even),
+table.stripes-hover > * > tr:hover {
   background: #f8f8f7;
 }
 
@@ -1702,8 +1693,7 @@ dl dd:last-child > :last-child {
   margin-bottom: 0;
 }
 
-ol > li p,
-ul > li p,
+li p,
 ul dd,
 ol dd,
 .olist .olist,
@@ -1733,6 +1723,11 @@ ol.unnumbered {
 ul.unstyled,
 ol.unstyled {
   margin-left: 0;
+}
+
+li > p:empty:only-child::before {
+  content: "";
+  display: inline-block;
 }
 
 ul.checklist > li > p:first-child {
@@ -1947,17 +1942,6 @@ sup.footnoteref a:active {
   margin-top: -0.625em;
   margin-bottom: 0;
   padding: 0.75em 0;
-}
-
-.gist .file-data > table {
-  border: 0;
-  background: #fff;
-  width: 100%;
-  margin-bottom: 0;
-}
-
-.gist .file-data > table td.line-data {
-  width: 99%;
 }
 
 div.unbreakable {
@@ -2218,6 +2202,7 @@ p,
 blockquote,
 dt,
 td.content,
+td.hdlist1,
 span.alt,
 summary {
   font-size: 1.0625rem;

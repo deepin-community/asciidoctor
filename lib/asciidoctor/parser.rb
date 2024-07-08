@@ -89,10 +89,10 @@ class Parser
   #
   # returns the Document object
   def self.parse(reader, document, options = {})
-    block_attributes = parse_document_header(reader, document)
+    block_attributes = parse_document_header(reader, document, (header_only = options[:header_only]))
 
     # NOTE don't use a postfix conditional here as it's known to confuse JRuby in certain circumstances
-    unless options[:header_only]
+    unless header_only
       while reader.has_more_lines?
         new_section, block_attributes = next_section(reader, document, block_attributes)
         if new_section
@@ -117,7 +117,7 @@ class Parser
   # which are automatically removed by the reader.
   #
   # returns the Hash of orphan block attributes captured above the header
-  def self.parse_document_header(reader, document)
+  def self.parse_document_header(reader, document, header_only = false)
     # capture lines of block-level metadata and plow away comment lines that precede first block
     block_attrs = reader.skip_blank_lines ? (parse_block_metadata_lines reader, document) : {}
     doc_attrs = document.attributes
@@ -125,6 +125,7 @@ class Parser
     # special case, block title is not allowed above document title,
     # carry attributes over to the document body
     if (implicit_doctitle = is_next_line_doctitle? reader, block_attrs, doc_attrs['leveloffset']) && block_attrs['title']
+      doc_attrs['authorcount'] = 0
       return document.finalize_header block_attrs, false
     end
 
@@ -168,7 +169,7 @@ class Parser
       end
       block_attrs.clear
       (modified_attrs = document.instance_variable_get :@attributes_modified).delete 'doctitle'
-      parse_header_metadata reader, document
+      parse_header_metadata reader, document, nil
       if modified_attrs.include? 'doctitle'
         if (val = doc_attrs['doctitle']).nil_or_empty? || val == doctitle_attr_val
           doc_attrs['doctitle'] = doctitle_attr_val
@@ -179,10 +180,19 @@ class Parser
         modified_attrs << 'doctitle'
       end
       document.register :refs, [doc_id, document] if doc_id
+    elsif (author = doc_attrs['author'])
+      author_metadata = process_authors author, true, false
+      author_metadata.delete 'authorinitials' if doc_attrs['authorinitials']
+      doc_attrs.update author_metadata
+    elsif (author = doc_attrs['authors'])
+      author_metadata = process_authors author, true
+      doc_attrs.update author_metadata
+    else
+      doc_attrs['authorcount'] = 0
     end
 
     # parse title and consume name section of manpage document
-    parse_manpage_header reader, document, block_attrs if document.doctype == 'manpage'
+    parse_manpage_header reader, document, block_attrs, header_only if document.doctype == 'manpage'
 
     # NOTE block_attrs are the block-level attributes (not document attributes) that
     # precede the first line of content (document title, first section or first block)
@@ -192,7 +202,7 @@ class Parser
   # Public: Parses the manpage header of the AsciiDoc source read from the Reader
   #
   # returns Nothing
-  def self.parse_manpage_header(reader, document, block_attributes)
+  def self.parse_manpage_header(reader, document, block_attributes, header_only = false)
     if ManpageTitleVolnumRx =~ (doc_attrs = document.attributes)['doctitle']
       doc_attrs['manvolnum'] = manvolnum = $2
       doc_attrs['mantitle'] = (((mantitle = $1).include? ATTR_REF_HEAD) ? (document.sub_attributes mantitle) : mantitle).downcase
@@ -209,6 +219,8 @@ class Parser
         doc_attrs['docname'] = manname
         doc_attrs['outfilesuffix'] = %(.#{manvolnum})
       end
+    elsif header_only
+      # done
     else
       reader.skip_blank_lines
       reader.save
@@ -386,18 +398,22 @@ class Parser
           # REVIEW this may be doing too much
           if part
             if !section.blocks?
-              # if this block wasn't marked as [partintro], emulate behavior as if it had
+              # if this not a [partintro] open block, enclose it in a [partintro] open block
               if new_block.style != 'partintro'
-                # emulate [partintro] paragraph
-                if new_block.context == :paragraph
-                  new_block.context = :open
+                # if this is already a normal open block, simply add the partintro style
+                if new_block.style == 'open' && new_block.context == :open
                   new_block.style = 'partintro'
-                # emulate [partintro] open block
                 else
                   new_block.parent = (intro = Block.new section, :open, content_model: :compound)
                   intro.style = 'partintro'
                   section.blocks << intro
                 end
+              # if this is a [partintro] paragraph, convert it to a [partintro] open block w/ single paragraph
+              elsif new_block.content_model == :simple
+                new_block.content_model = :compound
+                new_block << (Block.new new_block, :paragraph, source: new_block.lines, subs: new_block.subs)
+                new_block.lines.clear
+                new_block.subs.clear
               end
             elsif section.blocks.size == 1
               first_block = section.blocks[0]
@@ -407,12 +423,11 @@ class Parser
               # rebuild [partintro] paragraph as an open block
               elsif first_block.content_model != :compound
                 new_block.parent = (intro = Block.new section, :open, content_model: :compound)
-                intro.style = 'partintro'
-                section.blocks.shift
-                if first_block.style == 'partintro'
+                if first_block.style == (intro.style = 'partintro')
                   first_block.context = :paragraph
                   first_block.style = nil
                 end
+                section.blocks.shift
                 intro << first_block
                 section.blocks << intro
               end
@@ -452,7 +467,7 @@ class Parser
     end
 
     # The attributes returned here are orphaned attributes that fall at the end
-    # of a section that need to get transfered to the next section
+    # of a section that need to get transferred to the next section
     # see "trailing block attributes transfer to the following section" in
     # test/attributes_test.rb for an example
     [section == parent ? nil : section, attributes.merge]
@@ -647,7 +662,7 @@ class Parser
                 if (default_attrs = ext_config[:default_attrs])
                   attributes.update(default_attrs) {|_, old_v| old_v }
                 end
-                if (block = extension.process_method[parent, target, attributes])
+                if (block = extension.process_method[parent, target, attributes]) && block != parent
                   attributes.replace block.attributes
                   break
                 else
@@ -1038,12 +1053,12 @@ class Parser
     if (extension = options[:extension])
       # QUESTION do we want to delete the style?
       attributes.delete('style')
-      if (block = extension.process_method[parent, block_reader || (Reader.new lines), attributes.merge])
+      if (block = extension.process_method[parent, block_reader || (Reader.new lines), attributes.merge]) && block != parent
         attributes.replace block.attributes
-        # FIXME if the content model is set to compound, but we only have simple in this context, then
-        # forcefully set the content_model to simple to prevent parsing blocks from children
-        # TODO document this behavior!!
-        if block.content_model == :compound && !(lines = block.lines).empty?
+        # NOTE an extension can change the content model from :simple to :compound. It's up to the extension
+        # to decide which one to use. The extension can consult the cloaked-context attribute to determine
+        # if the input is a paragraph or delimited block.
+        if block.content_model == :compound && Block === block && !(lines = block.lines).empty?
           content_model = :compound
           block_reader = Reader.new lines
         end
@@ -1156,8 +1171,8 @@ class Parser
           if reftext.include? ']'
             reftext = reftext.gsub '\]', ']'
             reftext = document.sub_attributes reftext if reftext.include? ATTR_REF_HEAD
-          elsif (reftext.include? ATTR_REF_HEAD) && (reftext = document.sub_attributes reftext).empty?
-            next
+          elsif reftext.include? ATTR_REF_HEAD
+            reftext = nil if (reftext = document.sub_attributes reftext).empty?
           end
         end
       end
@@ -1427,21 +1442,33 @@ class Parser
 
       # a delimited block immediately breaks the list unless preceded
       # by a list continuation (they are harsh like that ;0)
-      if (match = is_delimited_block?(this_line, true))
-        if continuation == :active
-          buffer << this_line
-          # grab all the lines in the block, leaving the delimiters in place
-          # we're being more strict here about the terminator, but I think that's a good thing
-          buffer.concat reader.read_lines_until(terminator: match.terminator, read_last_line: true, context: nil)
-          continuation = :inactive
-        else
+      if (match = is_delimited_block? this_line, true)
+        break unless continuation == :active
+        buffer << this_line
+        # grab all the lines in the block, leaving the delimiters in place
+        # we're being more strict here about the terminator, but I think that's a good thing
+        buffer.concat reader.read_lines_until terminator: match.terminator, read_last_line: true, context: nil
+        continuation = :inactive
+      # BlockAttributeLineRx only breaks dlist if ensuing line is not a list item
+      elsif dlist && continuation != :active && (this_line.start_with? '[') && (BlockAttributeLineRx.match? this_line)
+        block_attribute_lines = [this_line]
+        while (next_line = reader.peek_line)
+          if is_delimited_block? next_line
+            interrupt = true
+          elsif next_line.empty? || ((next_line.start_with? '[') && (BlockAttributeLineRx.match? next_line))
+            block_attribute_lines << reader.read_line
+            next
+          elsif (AnyListRx.match? next_line) && !(is_sibling_list_item? next_line, list_type, sibling_trait)
+            buffer.concat block_attribute_lines
+          else # rubocop:disable Lint/DuplicateBranch
+            interrupt = true
+          end
           break
         end
-      # technically BlockAttributeLineRx only breaks if ensuing line is not a list item
-      # which really means BlockAttributeLineRx only breaks if it's acting as a block delimiter
-      # FIXME to be AsciiDoc compliant, we shouldn't break if style in attribute line is "literal" (i.e., [literal])
-      elsif dlist && continuation != :active && (BlockAttributeLineRx.match? this_line)
-        break
+        if interrupt
+          reader.unshift_lines block_attribute_lines
+          break
+        end
       elsif continuation == :active && !this_line.empty?
         # literal paragraphs have special considerations (and this is one of
         # two entry points into one)
@@ -1458,7 +1485,8 @@ class Parser
           end
           continuation = :inactive
         # let block metadata play out until we find the block
-        elsif (BlockTitleRx.match? this_line) || (BlockAttributeLineRx.match? this_line) || (AttributeEntryRx.match? this_line)
+        elsif ((ch0 = this_line.chr) == '.' && (BlockTitleRx.match? this_line)) ||
+            (ch0 == '[' && (BlockAttributeLineRx.match? this_line)) || (ch0 == ':' && (AttributeEntryRx.match? this_line))
           buffer << this_line
         else
           if (nested_list_type = (within_nested_list ? [:dlist] : NESTABLE_LIST_CONTEXTS).find {|ctx| ListRxMap[ctx].match? this_line })
@@ -1510,7 +1538,7 @@ class Parser
             break
           end
         else # only dlist in need of item text, so slurp it up!
-          # pop the blank line so it's not interpretted as a list continuation
+          # pop the blank line so it's not interpreted as a list continuation
           buffer.pop unless within_nested_list
           buffer << this_line
           has_text = true
@@ -1769,38 +1797,31 @@ class Parser
   #  parse_header_metadata(Reader.new data, nil, normalize: true)
   #  # => { 'author' => 'Author Name', 'firstname' => 'Author', 'lastname' => 'Name', 'email' => 'author@example.org',
   #  #       'revnumber' => '1.0', 'revdate' => '2012-12-21', 'revremark' => 'Coincide w/ end of world.' }
-  def self.parse_header_metadata(reader, document = nil)
+  def self.parse_header_metadata reader, document = nil, retrieve = true
     doc_attrs = document && document.attributes
     # NOTE this will discard any comment lines, but not skip blank lines
     process_attribute_entries reader, document
 
-    metadata, implicit_author, implicit_authorinitials = implicit_authors = {}, nil, nil
-
     if reader.has_more_lines? && !reader.next_line_empty?
-      unless (author_metadata = process_authors reader.read_line).empty?
-        if document
-          # apply header subs and assign to document
-          author_metadata.each do |key, val|
-            # NOTE the attributes substitution only applies for the email record
-            doc_attrs[key] = ::String === val ? (document.apply_header_subs val) : val unless doc_attrs.key? key
-          end
-
-          implicit_author = doc_attrs['author']
-          implicit_authorinitials = doc_attrs['authorinitials']
-          implicit_authors = doc_attrs['authors']
+      authorcount = (implicit_author_metadata = process_authors reader.read_line).delete 'authorcount'
+      if document && (doc_attrs['authorcount'] = authorcount) > 0
+        implicit_author_metadata.each do |key, val|
+          # apply header subs and assign to document; attributes substitution only relevant for email
+          doc_attrs[key] = document.apply_header_subs val unless doc_attrs.key? key
         end
-
-        metadata = author_metadata
+        implicit_author = doc_attrs['author']
+        implicit_authorinitials = doc_attrs['authorinitials']
+        implicit_authors = doc_attrs['authors']
       end
+      implicit_author_metadata['authorcount'] = authorcount
 
       # NOTE this will discard any comment lines, but not skip blank lines
       process_attribute_entries reader, document
 
-      rev_metadata = {}
-
       if reader.has_more_lines? && !reader.next_line_empty?
         rev_line = reader.read_line
-        if (match = RevisionInfoLineRx.match(rev_line))
+        if (match = RevisionInfoLineRx.match rev_line)
+          rev_metadata = {}
           rev_metadata['revnumber'] = match[1].rstrip if match[1]
           unless (component = match[2].strip).empty?
             # version must begin with 'v' if date is absent
@@ -1811,23 +1832,16 @@ class Parser
             end
           end
           rev_metadata['revremark'] = match[3].rstrip if match[3]
+          if document && !rev_metadata.empty?
+            # apply header subs and assign to document
+            rev_metadata.each do |key, val|
+              doc_attrs[key] = document.apply_header_subs val unless doc_attrs.key? key
+            end
+          end
         else
           # throw it back
           reader.unshift_line rev_line
         end
-      end
-
-      unless rev_metadata.empty?
-        if document
-          # apply header subs and assign to document
-          rev_metadata.each do |key, val|
-            unless doc_attrs.key? key
-              doc_attrs[key] = document.apply_header_subs val
-            end
-          end
-        end
-
-        metadata.update rev_metadata
       end
 
       # NOTE this will discard any comment lines, but not skip blank lines
@@ -1835,7 +1849,7 @@ class Parser
 
       reader.skip_blank_lines
     else
-      author_metadata = {}
+      implicit_author_metadata = {}
     end
 
     # process author attribute entries that override (or stand in for) the implicit author line
@@ -1852,7 +1866,7 @@ class Parser
         while doc_attrs.key? author_key
           # only use indexed author attribute if value is different
           # leaves corner case if line matches with underscores converted to spaces; use double space to force
-          if (author_override = doc_attrs[author_key]) == author_metadata[author_key]
+          if (author_override = doc_attrs[author_key]) == implicit_author_metadata[author_key]
             authors << nil
             sparse = true
           else
@@ -1866,20 +1880,24 @@ class Parser
           authors.each_with_index do |author, idx|
             next if author
             authors[idx] = [
-              author_metadata[%(firstname_#{name_idx = idx + 1})],
-              author_metadata[%(middlename_#{name_idx})],
-              author_metadata[%(lastname_#{name_idx})]
+              implicit_author_metadata[%(firstname_#{name_idx = idx + 1})],
+              implicit_author_metadata[%(middlename_#{name_idx})],
+              implicit_author_metadata[%(lastname_#{name_idx})]
             ].compact.map {|it| it.tr ' ', '_' }.join ' '
           end if sparse
           # process as names only
           author_metadata = process_authors authors, true, false
         else
-          author_metadata = {}
+          author_metadata = { 'authorcount' => 0 }
         end
       end
 
-      if author_metadata.empty?
-        metadata['authorcount'] ||= (doc_attrs['authorcount'] = 0)
+      if author_metadata['authorcount'] == 0
+        if authorcount
+          author_metadata = nil
+        else
+          doc_attrs['authorcount'] = 0
+        end
       else
         doc_attrs.update author_metadata
 
@@ -1890,7 +1908,7 @@ class Parser
       end
     end
 
-    metadata
+    implicit_author_metadata.merge rev_metadata.to_h, author_metadata.to_h if retrieve
   end
 
   # Internal: Parse the author line into a Hash of author metadata

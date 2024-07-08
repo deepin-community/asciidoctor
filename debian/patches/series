@@ -1,2 +1,4 @@
 data_path.patch
 run-cucumber-without-bundler.patch
+fix-blocks-test.patch
+autopkgtest.patch

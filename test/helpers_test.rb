@@ -19,18 +19,18 @@ context 'Helpers' do
 
   context 'URIs and Paths' do
     test 'rootname should return file name without extension' do
-      assert_equal 'master', Asciidoctor::Helpers.rootname('master.adoc')
-      assert_equal 'docs/master', Asciidoctor::Helpers.rootname('docs/master.adoc')
+      assert_equal 'main', Asciidoctor::Helpers.rootname('main.adoc')
+      assert_equal 'docs/main', Asciidoctor::Helpers.rootname('docs/main.adoc')
     end
 
     test 'rootname should file name if it has no extension' do
-      assert_equal 'master', Asciidoctor::Helpers.rootname('master')
-      assert_equal 'docs/master', Asciidoctor::Helpers.rootname('docs/master')
+      assert_equal 'main', Asciidoctor::Helpers.rootname('main')
+      assert_equal 'docs/main', Asciidoctor::Helpers.rootname('docs/main')
     end
 
     test 'rootname should ignore dot not in last segment' do
-      assert_equal 'include.d/master', Asciidoctor::Helpers.rootname('include.d/master')
-      assert_equal 'include.d/master', Asciidoctor::Helpers.rootname('include.d/master.adoc')
+      assert_equal 'include.d/main', Asciidoctor::Helpers.rootname('include.d/main')
+      assert_equal 'include.d/main', Asciidoctor::Helpers.rootname('include.d/main.adoc')
     end
 
     test 'extname? should return whether path contains an extname' do
@@ -49,6 +49,20 @@ context 'Helpers' do
     test 'UriSniffRx should not detect an absolute Windows path as a URI' do
       assert Asciidoctor::UriSniffRx !~ 'c:/sample.adoc'
       assert Asciidoctor::UriSniffRx !~ 'c:\\sample.adoc'
+    end
+
+    test 'uriish? should not detect a classloader path as a URI on JRuby' do
+      input = 'uri:classloader:/sample.png'
+      assert Asciidoctor::UriSniffRx =~ input
+      if jruby?
+        refute Asciidoctor::Helpers.uriish? input
+      else
+        assert Asciidoctor::Helpers.uriish? input
+      end
+    end
+
+    test 'UriSniffRx should not detect URI that does not start on first line' do
+      assert Asciidoctor::UriSniffRx !~ %(text\nhttps://example.org)
     end
   end
 
@@ -76,7 +90,7 @@ context 'Helpers' do
         Asciidoctor::Helpers.class_for_name 'InvalidModule::InvalidClass'
         flunk 'Expecting RuntimeError to be raised'
       rescue NameError => e
-        assert_equal 'Could not resolve class for name: InvalidModule::InvalidClass', e.message
+        assert_match %r/^Could not resolve class for name: InvalidModule::InvalidClass$/, e.message
       end
     end
 
@@ -85,7 +99,7 @@ context 'Helpers' do
         Asciidoctor::Helpers.class_for_name 'foobar'
         flunk 'Expecting RuntimeError to be raised'
       rescue NameError => e
-        assert_equal 'Could not resolve class for name: foobar', e.message
+        assert_match %r/^Could not resolve class for name: foobar$/, e.message
       end
     end
 
@@ -94,7 +108,7 @@ context 'Helpers' do
         Asciidoctor::Helpers.class_for_name 'Asciidoctor::Extensions::String'
         flunk 'Expecting RuntimeError to be raised'
       rescue NameError => e
-        assert_equal 'Could not resolve class for name: Asciidoctor::Extensions::String', e.message
+        assert_match %r/^Could not resolve class for name: Asciidoctor::Extensions::String$/, e.message
       end
     end
 
@@ -103,7 +117,7 @@ context 'Helpers' do
         Asciidoctor::Helpers.class_for_name 'Asciidoctor::Extensions'
         flunk 'Expecting RuntimeError to be raised'
       rescue NameError => e
-        assert_equal 'Could not resolve class for name: Asciidoctor::Extensions', e.message
+        assert_match %r/^Could not resolve class for name: Asciidoctor::Extensions$/, e.message
       end
     end
 
@@ -124,7 +138,7 @@ context 'Helpers' do
         Asciidoctor::Helpers.resolve_class 'Asciidoctor::Extensions::String'
         flunk 'Expecting RuntimeError to be raised'
       rescue NameError => e
-        assert_equal 'Could not resolve class for name: Asciidoctor::Extensions::String', e.message
+        assert_match %r/^Could not resolve class for name: Asciidoctor::Extensions::String$/, e.message
       end
     end
   end

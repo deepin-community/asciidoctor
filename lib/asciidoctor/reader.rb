@@ -125,16 +125,21 @@ class Reader
   # Returns the next line of the source data as a String if there are lines remaining.
   # Returns nothing if there is no more data.
   def peek_line direct = false
-    if direct || @look_ahead > 0
-      @unescape_next_line ? ((line = @lines[-1]).slice 1, line.length) : @lines[-1]
-    elsif @lines.empty?
-      @look_ahead = 0
-      nil
-    else
-      # FIXME the problem with this approach is that we aren't
-      # retaining the modified line (hence the @unescape_next_line tweak)
-      # perhaps we need a stack of proxied lines
-      (process_line @lines[-1]) || peek_line
+    while true
+      next_line = @lines[-1]
+      if direct || @look_ahead > 0
+        return @unescape_next_line ? (next_line.slice 1, next_line.length) : next_line
+      elsif next_line
+        # FIXME the problem with this approach is that we aren't
+        # retaining the modified line (hence the @unescape_next_line tweak)
+        # perhaps we need a stack of proxied lines
+        if (line = process_line next_line)
+          return line
+        end
+      else
+        @look_ahead = 0
+        return
+      end
     end
   end
 
@@ -690,7 +695,7 @@ class PreprocessorReader < Reader
       # only process lines in AsciiDoc files
       if (@process_lines = file.end_with?(*ASCIIDOC_EXTENSIONS.keys))
         # NOTE registering the include with a nil value tracks it while not making it visible to interdocument xrefs
-        @includes[path.slice 0, (path.rindex '.')] = attributes['partial-option'] ? nil : true
+        @includes[path.slice 0, (path.rindex '.')] ||= attributes['partial-option'] ? nil : true
       end
     else
       @dir = '.'
@@ -698,7 +703,7 @@ class PreprocessorReader < Reader
       @process_lines = true
       if (@path = path)
         # NOTE registering the include with a nil value tracks it while not making it visible to interdocument xrefs
-        @includes[Helpers.rootname path] = attributes['partial-option'] ? nil : true
+        @includes[Helpers.rootname path] ||= attributes['partial-option'] ? nil : true
       else
         @path = '<stdin>'
       end
@@ -949,7 +954,7 @@ class PreprocessorReader < Reader
         if no_target
           # the text in brackets must match a conditional expression
           if text && EvalExpressionRx =~ text.strip
-            # NOTE assignments must happen before call to resolve_expr_val for compatiblity with Opal
+            # NOTE assignments must happen before call to resolve_expr_val for compatibility with Opal
             lhs = $1
             # regex enforces a restricted set of math-related operations (==, !=, <=, >=, <, >)
             op = $2
@@ -1035,7 +1040,7 @@ class PreprocessorReader < Reader
     # however, be friendly and at least make it a link to the source document
     elsif doc.safe >= SafeMode::SECURE
       # FIXME we don't want to use a link macro if we are in a verbatim context
-      replace_next_line %(link:#{expanded_target}[])
+      replace_next_line %(link:#{expanded_target}[role=include])
     elsif @maxdepth
       if @include_stack.size >= @maxdepth[:curr]
         logger.error message_with_context %(maximum include depth of #{@maxdepth[:rel]} exceeded), source_location: cursor
@@ -1125,7 +1130,7 @@ class PreprocessorReader < Reader
           push_include inc_lines, inc_path, relpath, inc_offset, parsed_attrs
         end
       elsif inc_tags
-        inc_lines, inc_offset, inc_lineno, tag_stack, tags_used, active_tag = [], nil, 0, [], ::Set.new, nil
+        inc_lines, inc_offset, inc_lineno, tag_stack, tags_selected, active_tag = [], nil, 0, [], ::Set.new, nil
         if inc_tags.key? '**'
           select = base_select = inc_tags.delete '**'
           if inc_tags.key? '*'
@@ -1164,9 +1169,9 @@ class PreprocessorReader < Reader
                     end
                   end
                 elsif inc_tags.key? this_tag
-                  tags_used << this_tag
+                  tags_selected << this_tag if (select = inc_tags[this_tag])
                   # QUESTION should we prevent tag from being selected when enclosing tag is excluded?
-                  tag_stack << [(active_tag = this_tag), (select = inc_tags[this_tag]), inc_lineno]
+                  tag_stack << [(active_tag = this_tag), select, inc_lineno]
                 elsif !wildcard.nil?
                   select = active_tag && !select ? false : wildcard
                   tag_stack << [(active_tag = this_tag), select, inc_lineno]
@@ -1187,7 +1192,7 @@ class PreprocessorReader < Reader
             logger.warn message_with_context %(detected unclosed tag '#{tag_name}' starting at line #{tag_lineno} of include #{target_type}: #{inc_path}), source_location: cursor, include_location: (create_include_cursor inc_path, expanded_target, tag_lineno)
           end
         end
-        unless (missing_tags = inc_tags.keys - tags_used.to_a).empty?
+        unless (missing_tags = inc_tags.keep_if {|_, v| v }.keys - tags_selected.to_a).empty?
           logger.warn message_with_context %(tag#{missing_tags.size > 1 ? 's' : ''} '#{missing_tags.join ', '}' not found in include #{target_type}: #{inc_path}), source_location: cursor
         end
         shift
@@ -1197,15 +1202,16 @@ class PreprocessorReader < Reader
           push_include inc_lines, inc_path, relpath, inc_offset, parsed_attrs
         end
       else
+        inc_content = nil
         begin
           # NOTE read content before shift so cursor is only advanced if IO operation succeeds
           inc_content = reader.call(inc_path, read_mode) {|f| f.read }
           shift
-          push_include inc_content, inc_path, relpath, 1, parsed_attrs
         rescue
           logger.error message_with_context %(include #{target_type} not readable: #{inc_path}), source_location: cursor
           return replace_next_line %(Unresolved directive in #{@path} - include::#{expanded_target}[#{attrlist}])
         end
+        push_include inc_content, inc_path, relpath, 1, parsed_attrs
       end
       true
     end
@@ -1232,7 +1238,7 @@ class PreprocessorReader < Reader
   def resolve_include_path target, attrlist, attributes
     doc = @document
     if (Helpers.uriish? target) || (::String === @dir ? nil : (target = %(#{@dir}/#{target})))
-      return replace_next_line %(link:#{target}[#{attrlist}]) unless doc.attr? 'allow-uri-read'
+      return replace_next_line %(link:#{target}[role=include]) unless doc.attr? 'allow-uri-read'
       if doc.attr? 'cache-uri'
         # caching requires the open-uri-cached gem to be installed
         # processing will be automatically aborted if these libraries can't be opened
@@ -1280,27 +1286,22 @@ class PreprocessorReader < Reader
 
   # Private: Ignore front-matter, commonly used in static site generators
   def skip_front_matter! data, increment_linenos = true
-    front_matter = nil
-    if data[0] == '---'
-      original_data = data.drop 0
-      data.shift
-      front_matter = []
+    return unless (delim = data[0]) == '---'
+    original_data = data.drop 0
+    data.shift
+    front_matter = []
+    @lineno += 1 if increment_linenos
+    until (eof = data.empty?) || data[0] == delim
+      front_matter << data.shift
       @lineno += 1 if increment_linenos
-      while !data.empty? && data[0] != '---'
-        front_matter << data.shift
-        @lineno += 1 if increment_linenos
-      end
-
-      if data.empty?
-        data.unshift(*original_data)
-        @lineno = 0 if increment_linenos
-        front_matter = nil
-      else
-        data.shift
-        @lineno += 1 if increment_linenos
-      end
     end
-
+    if eof
+      data.unshift(*original_data)
+      @lineno -= original_data.size if increment_linenos
+      return
+    end
+    data.shift
+    @lineno += 1 if increment_linenos
     front_matter
   end
 

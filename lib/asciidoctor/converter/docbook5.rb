@@ -39,11 +39,25 @@ class Converter::DocBook5Converter < Converter::Base
     result << ((node.attr? 'sectnumlevels') ? %(<?asciidoc-numbered maxdepth="#{node.attr 'sectnumlevels'}"?>) : '<?asciidoc-numbered?>') if node.attr? 'sectnums'
     lang_attribute = (node.attr? 'nolang') ? '' : %( xml:lang="#{node.attr 'lang', 'en'}")
     if (root_tag_name = node.doctype) == 'manpage'
-      root_tag_name = 'refentry'
+      manpage = true
+      root_tag_name = 'article'
     end
     root_tag_idx = result.size
     id = node.id
     result << (document_info_tag node) unless node.noheader
+    if manpage
+      result << '<refentry>'
+      result << '<refmeta>'
+      result << %(<refentrytitle>#{node.apply_reftext_subs node.attr 'mantitle'}</refentrytitle>) if node.attr? 'mantitle'
+      result << %(<manvolnum>#{node.attr 'manvolnum'}</manvolnum>) if node.attr? 'manvolnum'
+      result << %(<refmiscinfo class="source">#{node.attr 'mansource', '&#160;'}</refmiscinfo>)
+      result << %(<refmiscinfo class="manual">#{node.attr 'manmanual', '&#160;'}</refmiscinfo>)
+      result << '</refmeta>'
+      result << '<refnamediv>'
+      result += (node.attr 'mannames').map {|n| %(<refname>#{n}</refname>) } if node.attr? 'mannames'
+      result << %(<refpurpose>#{node.attr 'manpurpose'}</refpurpose>) if node.attr? 'manpurpose'
+      result << '</refnamediv>'
+    end
     unless (docinfo_content = node.docinfo :header).empty?
       result << docinfo_content
     end
@@ -51,6 +65,7 @@ class Converter::DocBook5Converter < Converter::Base
     unless (docinfo_content = node.docinfo :footer).empty?
       result << docinfo_content
     end
+    result << '</refentry>' if manpage
     id, node.id = node.id, nil unless id
     # defer adding root tag in case document ID is auto-generated on demand
     result.insert root_tag_idx, %(<#{root_tag_name} xmlns="http://docbook.org/ns/docbook" xmlns:xl="http://www.w3.org/1999/xlink" version="5.0"#{lang_attribute}#{common_attributes id}>)
@@ -66,7 +81,7 @@ class Converter::DocBook5Converter < Converter::Base
     else
       tag_name = node.sectname
     end
-    title_el = node.special && (node.option? 'untitled') ? '' : %(<title>#{node.title}</title>\n)
+    title_el = node.special && ((node.option? 'notitle') || (node.option? 'untitled')) ? '' : %(<title>#{node.title}</title>\n)
     %(<#{tag_name}#{common_attributes node.id, node.role, node.reftext}>
 #{title_el}#{node.content}
 </#{tag_name}>)
@@ -248,10 +263,10 @@ class Converter::DocBook5Converter < Converter::Base
   def convert_stem node
     if (idx = node.subs.index :specialcharacters)
       node.subs.delete_at idx
-      equation = node.content || ''
+      equation = node.content
       idx > 0 ? (node.subs.insert idx, :specialcharacters) : (node.subs.unshift :specialcharacters)
     else
-      equation = node.content || ''
+      equation = node.content
     end
     if node.style == 'asciimath'
       # NOTE fop requires jeuclid to process mathml markup
@@ -701,19 +716,6 @@ class Converter::DocBook5Converter < Converter::Base
       end
     end
     result << '</info>'
-
-    if doc.doctype == 'manpage'
-      result << '<refmeta>'
-      result << %(<refentrytitle>#{doc.attr 'mantitle'}</refentrytitle>) if doc.attr? 'mantitle'
-      result << %(<manvolnum>#{doc.attr 'manvolnum'}</manvolnum>) if doc.attr? 'manvolnum'
-      result << %(<refmiscinfo class="source">#{doc.attr 'mansource', '&#160;'}</refmiscinfo>)
-      result << %(<refmiscinfo class="manual">#{doc.attr 'manmanual', '&#160;'}</refmiscinfo>)
-      result << '</refmeta>'
-      result << '<refnamediv>'
-      result += (doc.attr 'mannames').map {|n| %(<refname>#{n}</refname>) } if doc.attr? 'mannames'
-      result << %(<refpurpose>#{doc.attr 'manpurpose'}</refpurpose>) if doc.attr? 'manpurpose'
-      result << '</refnamediv>'
-    end
 
     result.join LF
   end

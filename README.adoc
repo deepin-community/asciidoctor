@@ -1,6 +1,6 @@
 = Asciidoctor
-Dan Allen <https://github.com/mojavelinux[@mojavelinux]>; Sarah White <https://github.com/graphitefriction[@graphitefriction]>; Ryan Waldron <https://github.com/erebor[@erebor]>
-v2.0.16, 2021-08-03
+Dan Allen <https://github.com/mojavelinux[@mojavelinux]>; Sarah White <https://github.com/graphitefriction[@graphitefriction]>
+v2.0.20, 2023-05-18
 // settings:
 :idprefix:
 :idseparator: -
@@ -9,7 +9,6 @@ v2.0.16, 2021-08-03
 ifndef::env-github[:icons: font]
 ifdef::env-github[]
 :status:
-:outfilesuffix: .adoc
 :caution-caption: :fire:
 :important-caption: :exclamation:
 :note-caption: :paperclip:
@@ -17,7 +16,7 @@ ifdef::env-github[]
 :warning-caption: :warning:
 endif::[]
 // Variables:
-:release-version: 2.0.16
+:release-version: 2.0.20
 // URLs:
 :url-org: https://github.com/asciidoctor
 :url-repo: {url-org}/asciidoctor
@@ -36,8 +35,8 @@ ifdef::env-site[:url-project: link:]
 :url-rel-file-base: link:
 :url-rel-tree-base: link:
 ifdef::env-site,env-yard[]
-:url-rel-file-base: {url-repo}/blob/master/
-:url-rel-tree-base: {url-repo}/tree/master/
+:url-rel-file-base: {url-repo}/blob/HEAD/
+:url-rel-tree-base: {url-repo}/tree/HEAD/
 endif::[]
 :url-changelog: {url-rel-file-base}CHANGELOG.adoc
 :url-contribute: {url-rel-file-base}CONTRIBUTING.adoc
@@ -51,9 +50,8 @@ endif::[]
 :url-opal: https://opalrb.com
 :url-tilt: https://github.com/rtomayko/tilt
 :url-ruby: https://www.ruby-lang.org
-//:url-prototype: https://github.com/git/git-scm.com/commits/master/lib/asciidoc.rb This page doesn't exist anymore.
 // images:
-:image-url-screenshot: https://raw.githubusercontent.com/asciidoctor/asciidoctor/master/screenshot.png
+:image-url-screenshot: https://cdn.jsdelivr.net/gh/asciidoctor/asciidoctor/screenshot.png
 
 {url-project}[Asciidoctor] is a fast, open source, Ruby-based text processor for parsing AsciiDoc(R) into a document model and converting it to output formats such as HTML 5, DocBook 5, manual pages, PDF, EPUB 3, and other formats.
 
@@ -83,9 +81,6 @@ ifdef::status[]
 image:https://img.shields.io/gem/v/asciidoctor.svg[Latest Release, link={url-rubygem}]
 image:https://img.shields.io/badge/rubydoc.info-{release-version}-blue.svg[library (API) docs,link=https://www.rubydoc.info/gems/asciidoctor/{release-version}]
 image:https://github.com/asciidoctor/asciidoctor/workflows/CI/badge.svg[Build Status (GitHub Actions),link={url-repo}/actions]
-//image:https://img.shields.io/coveralls/asciidoctor/asciidoctor/master.svg[Code Coverage,link=https://coveralls.io/r/asciidoctor/asciidoctor]
-//image:https://codeclimate.com/github/asciidoctor/asciidoctor/badges/gpa.svg[Code Climate,link=https://codeclimate.com/github/asciidoctor/asciidoctor]
-//image:https://inch-ci.org/github/asciidoctor/asciidoctor.svg?branch=master[Docs Coverage,link=https://inch-ci.org/github/asciidoctor/asciidoctor]
 image:https://img.shields.io/badge/zulip-join_chat-brightgreen.svg[Project Chat (Zulip),link={url-chat}]
 endif::[]
 
@@ -135,27 +130,29 @@ If you're using AsciiDoc.py, see {url-docs}/asciidoctor/latest/migrate/asciidoc-
 
 Asciidoctor works on Linux, macOS and Windows and requires one of the following implementations of {url-ruby}[Ruby]:
 
-* CRuby (aka MRI) 2.3 - 3.0
-* JRuby 9.1 - 9.2
+* CRuby (aka MRI) 2.3 - 3.2
+* JRuby 9.1 - 9.4
 * TruffleRuby (GraalVM)
 
 [CAUTION]
 ====
 If you're using a non-English Windows environment, you may bump into an `Encoding::UndefinedConversionError` when invoking Asciidoctor.
-To solve this issue, we recommend changing the active code page in your console to UTF-8:
+To solve this issue, we recommend overriding the default external and internal character encodings to `utf-8`.
+You can do so by setting the `RUBYOPT` environment variable as follows:
 
- chcp 65001
+ RUBYOPT="-E utf-8:utf-8"
 
-Once you make this change, all your Unicode headaches will be behind you.
+Once you make this change, all your Unicode headaches should be behind you.
+
 If you're using an IDE like Eclipse, make sure you set the encoding to UTF-8 there as well.
-Asciidoctor works best when you use UTF-8 everywhere.
+Asciidoctor is optimized to work with UTF-8 as the default encoding.
 ====
 
 == Installation
 
 Asciidoctor is packaged and distributed to RubyGems.org as a RubyGem (aka gem) named {url-rubygem}[asciidoctor^].
 The asciidoctor gem can be installed on all major operating systems using Ruby packaging tools (gem or bundle).
-Asciidoctor is also distributed as a Docker image, as a package for numerous Linux distributions, and as a package for macOS (via Homebrew).
+Asciidoctor is also distributed as a Docker image, as a package for numerous Linux distributions, and as a package for macOS (via Homebrew and MacPorts).
 
 === Linux package managers
 
@@ -197,16 +194,29 @@ To install the package, open a terminal and type:
 
  $ sudo dnf install -y asciidoctor
 
-=== Homebrew (macOS)
+=== macOS
 
-You can use Homebrew, the macOS package manager, to install Asciidoctor.
-If you don’t have Homebrew on your computer, complete the installation instructions at https://brew.sh/[brew.sh] first.
-Once Homebrew is installed, you’re ready to install the `asciidoctor` gem.
+==== Homebrew
+
+You can use https://brew.sh[Homebrew], the macOS package manager, to install Asciidoctor.
+If you don't have Homebrew on your computer, complete the https://brew.sh[installation instructions] first.
+
+Once Homebrew is installed, you're ready to install the `asciidoctor` gem.
 Open a terminal and type:
 
  $ brew install asciidoctor
 
 Homebrew installs the `asciidoctor` gem into an exclusive prefix that's independent of system gems.
+
+==== MacPorts
+
+You can also use https://www.macports.org[MacPorts], another package manager for macOS, to install Asciidoctor.
+If you don't have MacPorts on your computer, complete the https://www.macports.org/install.php[installation instructions] first.
+
+Once MacPorts is installed, you're ready to install the `asciidoctor` gem via the https://ports.macports.org/port/asciidoctor/[Asciidoctor port].
+Open a terminal and type:
+
+ $ sudo port install asciidoctor
 
 === Windows
 
@@ -296,6 +306,13 @@ To upgrade the gem, use:
 
  $ brew update
  $ brew upgrade asciidoctor
+
+=== MacPorts (macOS)
+
+To upgrade the gem, use:
+
+ $ sudo port selfupdate
+ $ sudo port upgrade asciidoctor
 
 === gem install
 
@@ -452,7 +469,7 @@ Asciidoctor organization on GitHub:: {url-org}
 
 == Code of Conduct
 
-The core Asciidoctor project is governed by the https://github.com/asciidoctor/.github/blob/main/CODE-OF-CONDUCT.md[Code of Conduct] for the Asciidoctor community of projects.
+The core Asciidoctor project is governed by the https://github.com/asciidoctor/.github/blob/HEAD/CODE-OF-CONDUCT.md[Code of Conduct] for the Asciidoctor community of projects.
 By participating, you're agreeing to honor this code.
 Let's work together to make this a welcoming, professional, inclusive, and safe environment for everyone.
 
@@ -474,7 +491,7 @@ See the {url-license}[LICENSE] for the full license text.
 *Asciidoctor* is led by https://github.com/mojavelinux[Dan Allen] and https://github.com/graphitefriction[Sarah White] and has received contributions from {url-contributors}[many individuals] in Asciidoctor's awesome community.
 The project was initiated in 2012 by https://github.com/erebor[Ryan Waldron] based on a prototype written by https://github.com/nickh[Nick Hengeveld] for the Git website.
 
-*AsciiDoc.py* was started and maintained by Stuart Rackham from https://github.com/asciidoc-py/asciidoc-py2/blob/master/CHANGELOG.txt[2002 to 2013] and has received contributions from many individuals in the https://github.com/asciidoc-py/asciidoc-py2/graphs/contributors[AsciiDoc.py community].
+*AsciiDoc.py* was started and maintained by Stuart Rackham from https://github.com/asciidoc-py/asciidoc-py2/blob/HEAD/CHANGELOG.txt[2002 to 2013] and has received contributions from many individuals in the https://github.com/asciidoc-py/asciidoc-py2/graphs/contributors[AsciiDoc.py community].
 
 == Trademarks
 

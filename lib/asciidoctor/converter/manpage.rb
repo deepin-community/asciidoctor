@@ -28,7 +28,7 @@ class Converter::ManPageConverter < Converter::Base
   EllipsisCharRefRx = /&#8230;(?:&#8203;)?/
   WrappedIndentRx = /#{CG_BLANK}*#{LF}#{CG_BLANK}*/
   XMLMarkupRx = /&#?[a-z\d]+;|</
-  PCDATAFilterRx = /(&#?[a-z\d]+;|<[^>]+>)|([^&<]+)/
+  PCDATAFilterRx = %r((&#?[a-z\d]+;|<#{ESC}\\f\(CR.*?</#{ESC}\\fP>|<[^>]+>)|([^&<]+))
 
   def initialize backend, opts = {}
     @backend = backend
@@ -39,7 +39,7 @@ class Converter::ManPageConverter < Converter::Base
     unless node.attr? 'mantitle'
       raise 'asciidoctor: ERROR: doctype must be set to manpage when using manpage backend'
     end
-    mantitle = node.attr 'mantitle'
+    mantitle = (node.attr 'mantitle').gsub InvalidSectionIdCharsRx, ''
     manvolnum = node.attr 'manvolnum', '1'
     manname = node.attr 'manname', mantitle
     manmanual = node.attr 'manmanual'
@@ -236,7 +236,7 @@ r lw(\n(.lu*75u/100u).'
     result << (node.title? ? %(.sp
 .B #{manify node.captioned_title}
 .br) : '.sp')
-    result << %([#{node.alt}])
+    result << %([#{manify node.alt}])
     result.join LF
   end
 

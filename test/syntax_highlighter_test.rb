@@ -918,21 +918,21 @@ context 'Syntax Highlighter' do
 
     test 'should line highlight specified lines relative to start value' do
       input = <<~EOS
-        :source-highlighter: rouge
+      :source-highlighter: rouge
 
-        [source%linenums,ruby,start=5,highlight=6]
-        ----
-        get {
-          render "Hello, World!"
-        }
-        ----
+      [source%linenums,ruby,start=5,highlight=6]
+      ----
+      get {
+        render "Hello, World!"
+      }
+      ----
       EOS
 
       expected = <<~EOS.chop
-        <span class="n">get</span> <span class="p">{</span>
-        <span class="hll">  <span class="n">render</span> <span class="s2">"Hello, World!"</span>
-        </span><span class="p">}</span>
-        </pre>
+      <span class="n">get</span> <span class="p">{</span>
+      <span class="hll">  <span class="n">render</span> <span class="s2">"Hello, World!"</span>
+      </span><span class="p">}</span>
+      </pre>
       EOS
 
       output = convert_string_to_embedded input, safe: :safe
@@ -941,21 +941,21 @@ context 'Syntax Highlighter' do
 
     test 'should ignore start attribute when the value is 0' do
       input = <<~EOS
-        :source-highlighter: rouge
+      :source-highlighter: rouge
 
-        [source%linenums,ruby,start=0,highlight=6]
-        ----
-        get {
-          render "Hello, World!"
-        }
-        ----
+      [source%linenums,ruby,start=0,highlight=6]
+      ----
+      get {
+        render "Hello, World!"
+      }
+      ----
       EOS
 
       expected = <<~EOS.chop
-        <span class="n">get</span> <span class="p">{</span>
-          <span class="n">render</span> <span class="s2">"Hello, World!"</span>
-        <span class="p">}</span>
-        </pre>
+      <span class="n">get</span> <span class="p">{</span>
+        <span class="n">render</span> <span class="s2">"Hello, World!"</span>
+      <span class="p">}</span>
+      </pre>
       EOS
 
       output = convert_string_to_embedded input, safe: :safe
@@ -964,21 +964,21 @@ context 'Syntax Highlighter' do
 
     test 'should not line highlight when the start attribute is greater than highlight' do
       input = <<~EOS
-        :source-highlighter: rouge
+      :source-highlighter: rouge
 
-        [source%linenums,ruby,start=7,highlight=6]
-        ----
-        get {
-          render "Hello, World!"
-        }
-        ----
+      [source%linenums,ruby,start=7,highlight=6]
+      ----
+      get {
+        render "Hello, World!"
+      }
+      ----
       EOS
 
       expected = <<~EOS.chop
-        <span class="n">get</span> <span class="p">{</span>
-          <span class="n">render</span> <span class="s2">"Hello, World!"</span>
-        <span class="p">}</span>
-        </pre>
+      <span class="n">get</span> <span class="p">{</span>
+        <span class="n">render</span> <span class="s2">"Hello, World!"</span>
+      <span class="p">}</span>
+      </pre>
       EOS
 
       output = convert_string_to_embedded input, safe: :safe
@@ -1017,8 +1017,8 @@ context 'Syntax Highlighter' do
       EOS
       output = convert_string input, safe: :safe, linkcss_default: true
       assert_css 'pre.rouge', output, 1
-      assert_includes output, 'pre.rouge .no {'
-      assert_match %r/pre\.rouge \{\s*background-color: #f8f8f8;/m, output
+      expected_css = (Asciidoctor::SyntaxHighlighter.for 'rouge').read_stylesheet 'github'
+      assert_includes output, expected_css
     end
 
     test 'should restore isolated callout mark on last line of source' do
@@ -1123,6 +1123,30 @@ context 'Syntax Highlighter' do
       style_node = xmlnodes_at_xpath '//style[contains(text(), "pre.pygments")]', output, 1
       refute_nil style_node
       assert_equal 'head', style_node.parent.name
+    end
+
+    test 'should embed stylesheet for pygments style' do
+      input = <<~'EOS'
+      :source-highlighter: pygments
+      :pygments-style: monokai
+
+      [source,python]
+      ----
+      from pygments import highlight
+      from pygments.lexers import PythonLexer
+      from pygments.formatters import HtmlFormatter
+
+      source = 'print "Hello World"'
+      print(highlight(source, PythonLexer(), HtmlFormatter()))
+      ----
+      EOS
+      output = convert_string input, safe: :safe, linkcss_default: false
+      assert_css 'style', output, 2
+      style_nodes = xmlnodes_at_xpath '//style[contains(text(), "pre.pygments")]', output
+      assert_equal 2, style_nodes.size
+      pygments_styles = style_nodes[1].to_s
+      assert_match %r/^pre\.pygments *\{/, pygments_styles
+      refute_match %r/^pre *\{/, pygments_styles
     end
 
     test 'should gracefully fallback to default style if specified style not recognized' do
@@ -1230,32 +1254,34 @@ context 'Syntax Highlighter' do
       assert_css 'pre:not([style])', output, 2
     end
 
-    test 'should replace inline styles on lineno spans with class and preserve trailing space when linenums are enabled and source-highlighter is pygments' do
-      input = <<~'EOS'
-      :source-highlighter: pygments
-      :pygments-css: inline
-      :pygments-linenums-mode: inline
+    test 'should add lineno spans with class and trim trailing space when linenums are enabled and source-highlighter is pygments' do
+      %w(class style).each do |css_mode|
+        input = <<~EOS
+        :source-highlighter: pygments
+        :pygments-css: #{css_mode}
+        :pygments-linenums-mode: inline
 
-      [source%linenums,ruby]
-      ----
-      puts 'Hello, World!'
-      puts 'Hello, World!'
-      puts 'Hello, World!'
-      puts 'Hello, World!'
-      puts 'Hello, World!'
-      puts 'Hello, World!'
-      puts 'Hello, World!'
-      puts 'Hello, World!'
-      puts 'Hello, World!'
-      exit 0
-      ----
-      EOS
+        [source%linenums,ruby]
+        ----
+        puts 'Hello, World!'
+        puts 'Hello, World!'
+        puts 'Hello, World!'
+        puts 'Hello, World!'
+        puts 'Hello, World!'
+        puts 'Hello, World!'
+        puts 'Hello, World!'
+        puts 'Hello, World!'
+        puts 'Hello, World!'
+        exit 0
+        ----
+        EOS
 
-      output = convert_string_to_embedded input, safe: :safe
-      assert_css 'table.linenotable', output, 0
-      assert_css 'pre', output, 1
-      assert_includes output, '<span class="lineno"> 1 </span>'
-      assert_includes output, '<span class="lineno">10 </span>'
+        output = convert_string_to_embedded input, safe: :safe
+        assert_css 'table.linenotable', output, 0
+        assert_css 'pre', output, 1
+        assert_includes output, '<span class="linenos"> 1</span>'
+        assert_includes output, '<span class="linenos">10</span>'
+      end
     end
 
     test 'should line highlight specified lines' do

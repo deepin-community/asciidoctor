@@ -120,7 +120,7 @@ context 'Path Resolver' do
       end
     end
 
-    #test 'raises security error if jail is not a canoncial path' do
+    #test 'raises security error if jail is not a canonical path' do
     #  begin
     #    @resolver.system_path('images/tiger.png', '/etc', %(#{JAIL}/../foo))
     #    flunk 'Expecting SecurityError to be raised'
@@ -292,6 +292,18 @@ context 'Path Resolver' do
 
     test 'resolves UNC path if target is posix-style UNC path' do
       assert_equal '//server/docs/output.html', @resolver.system_path('//server/docs/output.html')
+    end
+
+    test 'resolves classloader path if start is classloader path and target is relative', if: jruby? do
+      assert_equal 'uri:classloader:images/sample.png', @resolver.system_path('sample.png', 'uri:classloader:images')
+    end
+
+    test 'resolves classloader path if start is root-relative classloader path and target is relative', if: jruby? do
+      assert_equal 'uri:classloader:/images/sample.png', @resolver.system_path('sample.png', 'uri:classloader:/images')
+    end
+
+    test 'preserves classloader path if start is absolute path and target is classloader path', if: jruby? do
+      assert_equal 'uri:classloader:/images/sample.png', @resolver.system_path('uri:classloader:/images/sample.png', '/home/doctor/docs')
     end
 
     test 'resolves relative target relative to current directory if start is empty' do
