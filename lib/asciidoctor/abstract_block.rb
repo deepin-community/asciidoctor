@@ -11,7 +11,7 @@ class AbstractBlock < AbstractNode
   # * :compound - this block contains other blocks
   # * :simple - this block holds a paragraph of prose that receives normal substitutions
   # * :verbatim - this block holds verbatim text (displayed "as is") that receives verbatim substitutions
-  # * :raw - this block holds unprocessed content passed directly to the output with no sustitutions applied
+  # * :raw - this block holds unprocessed content passed directly to the output with no substitutions applied
   # * :empty - this block has no content
   attr_accessor :content_model
 
@@ -24,6 +24,7 @@ class AbstractBlock < AbstractNode
   attr_accessor :numeral
 
   # Public: Gets/Sets the location in the AsciiDoc source where this block begins.
+  # Tracking source location is not enabled by default, and is controlled by the sourcemap option.
   attr_accessor :source_location
 
   # Public: Get/Set the String style (block type qualifier) for this block.
@@ -129,11 +130,13 @@ class AbstractBlock < AbstractNode
 
   # Public: Check whether this block has any child Section objects.
   #
-  # Only applies to Document and Section instances
+  # Acts an an abstract method that always returns false unless this block is an
+  # instance of Document or Section.
+  # Both Document and Section provide overrides for this method.
   #
-  # Returns A [Boolean] to indicate whether this block has child Section objects
+  # Returns false
   def sections?
-    @next_section_index > 0
+    false
   end
 
   # Deprecated: Legacy property to get the String or Integer numeral of this section.
@@ -269,7 +272,7 @@ class AbstractBlock < AbstractNode
     ORDERED_LIST_KEYWORDS[list_type || @style]
   end
 
-  # Public: Get the String title of this Block with title substitions applied
+  # Public: Get the String title of this Block with title substitutions applied
   #
   # The following substitutions are applied to block and section titles:
   #

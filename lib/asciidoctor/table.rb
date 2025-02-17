@@ -300,7 +300,7 @@ class Table::Cell < AbstractBlock
       # QUESTION is is faster to check for :: before splitting?
       inner_document_lines = cell_text.split LF, -1
       if (unprocessed_line1 = inner_document_lines[0]).include? '::'
-        preprocessed_lines = (PreprocessorReader.new @document, [unprocessed_line1]).readlines
+        preprocessed_lines = (PreprocessorReader.new @document, [unprocessed_line1], inner_document_cursor).readlines
         unless unprocessed_line1 == preprocessed_lines[0] && preprocessed_lines.size < 2
           inner_document_lines.shift
           inner_document_lines.unshift(*preprocessed_lines) unless preprocessed_lines.empty?
@@ -411,7 +411,7 @@ end
 # class are primarily responsible for tracking the buffer of a cell as the parser
 # moves through the lines of the table using tail recursion. When a cell boundary
 # is located, the previous cell is closed, an instance of Table::Cell is
-# instantiated, the row is closed if the cell satisifies the column count and,
+# instantiated, the row is closed if the cell satisfies the column count and,
 # finally, a new buffer is allocated to track the next cell.
 class Table::ParserContext
   include Logging
@@ -659,25 +659,32 @@ class Table::ParserContext
           end
         end
       else
-        # QUESTION is this right for cells that span columns?
-        unless (column = @table.columns[@current_row.size])
-          logger.error message_with_context 'dropping cell because it exceeds specified number of columns', source_location: @reader.cursor_before_mark
-          return nil
-        end
+        column = @table.columns[@current_row.size]
       end
 
-      cell = Table::Cell.new(column, cell_text, cellspec, cursor: @reader.cursor_before_mark)
+      cell = Table::Cell.new column, cell_text, cellspec, cursor: (cursor_before_mark = @reader.cursor_before_mark)
       @reader.mark
       unless !cell.rowspan || cell.rowspan == 1
         activate_rowspan(cell.rowspan, (cell.colspan || 1))
       end
       @column_visits += (cell.colspan || 1)
       @current_row << cell
-      # don't close the row if we're on the first line and the column count has not been set explicitly
-      # TODO perhaps the colcount/linenum logic should be in end_of_row? (or a should_end_row? method)
-      close_row if end_of_row? && (@colcount != -1 || @linenum > 0 || (eol && i == repeat))
+      if (row_status = end_of_row?) > -1 && (@colcount != -1 || @linenum > 0 || (eol && i == repeat))
+        if row_status > 0
+          logger.error message_with_context 'dropping cell because it exceeds specified number of columns', source_location: cursor_before_mark
+          close_row true
+        else
+          close_row
+        end
+      end
     end
     @cell_open = false
+    nil
+  end
+
+  def close_table
+    return if @column_visits == 0
+    logger.error message_with_context 'dropping cells from incomplete row detected end of table', source_location: @reader.cursor_before_mark
     nil
   end
 
@@ -687,8 +694,8 @@ class Table::ParserContext
   # Array and counter variables.
   #
   # returns nothing
-  def close_row
-    @table.rows.body << @current_row
+  def close_row drop = false
+    @table.rows.body << @current_row unless drop
     # don't have to account for active rowspans here
     # since we know this is first row
     @colcount = @column_visits if @colcount == -1
@@ -709,8 +716,10 @@ class Table::ParserContext
   end
 
   # Internal: Check whether we've met the number of effective columns for the current row.
+  #
+  # returns -1 if not at end of row, 0 if exactly at end of row, and 1 if overruns end of row
   def end_of_row?
-    @colcount == -1 || effective_column_visits == @colcount
+    @colcount == -1 ? 0 : effective_column_visits <=> @colcount
   end
 
   # Internal: Calculate the effective column visits, which consists of the number of
