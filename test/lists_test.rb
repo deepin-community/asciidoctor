@@ -379,7 +379,7 @@ context "Bulleted lists (:ulist)" do
       assert_xpath '//ul/li/*[@class="admonitionblock note"]//td[@class="content"][normalize-space(text())="This is a note."]', output, 1
     end
 
-    test 'paragraph-like blocks attached to an ancestory list item by a list continuation should produce blocks' do
+    test 'paragraph-like blocks attached to an ancestor list item by a list continuation should produce blocks' do
       # NOTE cannot use single-quoted heredoc because of https://github.com/jruby/jruby/issues/4260
       input = <<~EOS
       * parent
@@ -1361,14 +1361,14 @@ context "Bulleted lists (:ulist)" do
 
     test 'trailing block title line attached by continuation should not create block' do
       input = <<~'EOS'
-    Lists
-    =====
+      Lists
+      =====
 
-    * Item one, paragraph one
-    +
-    .Disappears into the ether
+      * Item one, paragraph one
+      +
+      .Disappears into the ether
 
-    * Item two
+      * Item two
       EOS
       output = convert_string input
       assert_xpath '//ul', output, 1
@@ -2126,6 +2126,22 @@ context "Description lists (:dlist)" do
       assert_css 'dl', output, 1
       assert_css 'dl > dt', output, 1
       assert_css 'dl > dt:empty', output, 1
+    end
+
+    test 'should parse a dlist if term is include and principal text is []' do
+      input = 'include:: []'
+      output = convert_string_to_embedded input
+      assert_css 'dl', output, 1
+      assert_css 'dl > dt', output, 1
+      assert_xpath '(//dl/dt)[1]/following-sibling::dd/p[text() = "[]"]', output, 1
+    end
+
+    test 'should parse a dlist if term is include and principal text matches macro form' do
+      input = 'include:: pass:[${placeholder}]'
+      output = convert_string_to_embedded input
+      assert_css 'dl', output, 1
+      assert_css 'dl > dt', output, 1
+      assert_xpath '(//dl/dt)[1]/following-sibling::dd/p[text() = "${placeholder}"]', output, 1
     end
 
     test "single-line adjacent elements" do
@@ -2935,7 +2951,7 @@ context "Description lists (:dlist)" do
       assert_xpath '//dl//dl//dl//dl', output, 1
     end
 
-    test "single-line nested elements seperated by blank line at top level" do
+    test 'single-line nested elements separated by blank line at top level' do
       input = <<~'EOS'
       term1:: def1
 
@@ -2954,7 +2970,7 @@ context "Description lists (:dlist)" do
       assert_xpath '(//dl)[1]/dt[2]/following-sibling::dd/p[text() = "def2"]', output, 1
     end
 
-    test "single-line nested elements seperated by blank line at nested level" do
+    test 'single-line nested elements separated by blank line at nested level' do
       input = <<~'EOS'
       term1:: def1
       label1::: detail1
@@ -3010,7 +3026,7 @@ context "Description lists (:dlist)" do
       assert_xpath '(//dl)[1]/dt[2]/following-sibling::dd/p[text() = "def2"]', output, 1
     end
 
-    test "multi-line nested elements seperated by blank line at nested level repeated" do
+    test 'multi-line nested elements separated by blank line at nested level repeated' do
       input = <<~'EOS'
       term1::
       def1
@@ -3091,6 +3107,39 @@ context "Description lists (:dlist)" do
       assert_xpath '(//dl)[1]/dt[1]/following-sibling::dd/p[contains(text(), "continued")]', output, 1
       assert_xpath '//dl//dl/dt[normalize-space(text()) = "label1"]', output, 1
       assert_xpath '//dl//dl/dt/following-sibling::dd/p[text() = "detail1"]', output, 1
+    end
+
+    test 'nested dlist attached by list continuation should not consume detached paragraph' do
+      input = <<~'EOS'
+      term:: text
+      +
+      nested term::: text
+
+      paragraph
+      EOS
+      output = convert_string_to_embedded input
+      assert_xpath '//dl', output, 2
+      assert_xpath '//dl//dl', output, 1
+      assert_css '.dlist .paragraph', output, 0
+      assert_css '.dlist + .paragraph', output, 1
+    end
+
+    test 'nested dlist with attached block offset by empty line' do
+      input = <<~'EOS'
+      category::
+
+      term 1:::
+      +
+      --
+      def 1
+      --
+      EOS
+      output = convert_string_to_embedded input
+      assert_xpath '//dl', output, 2
+      assert_xpath '//dl//dl', output, 1
+      assert_xpath '(//dl)[1]/dt[1][normalize-space(text()) = "category"]', output, 1
+      assert_xpath '(//dl)[1]//dl/dt[1][normalize-space(text()) = "term 1"]', output, 1
+      assert_xpath '(//dl)[1]//dl/dt[1]/following-sibling::dd//p[starts-with(text(), "def 1")]', output, 1
     end
   end
 
@@ -4155,7 +4204,23 @@ context 'Description lists redux' do
       assert_xpath '//*[@class="dlist"]/following-sibling::*[@class="exampleblock"]//p[text()="detached"]', output, 1
     end
 
-    test 'attribute line breaks list even when term has no inline description' do
+    test 'block attribute line above delimited block that breaks a dlist is not duplicated' do
+      input = <<~'EOS'
+      == Lists
+
+      term:: desc
+      [.rolename]
+      ----
+      detached
+      ----
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '//*[@class="dlist"]/dl', output, 1
+      assert_xpath '//*[@class="dlist"]/following-sibling::*[@class="listingblock rolename"]', output, 1
+    end
+
+    test 'block attribute line above paragraph breaks list even when term has no inline description' do
       input = <<~'EOS'
       == Lists
 
@@ -4171,7 +4236,21 @@ context 'Description lists redux' do
       assert_xpath '//*[@class="dlist"]/following-sibling::*[@class="verseblock"]/pre[text()="detached"]', output, 1
     end
 
-    test 'id line breaks list even when term has no inline description' do
+    test 'block attribute line above paragraph that breaks a dlist is not duplicated' do
+      input = <<~'EOS'
+      == Lists
+
+      term:: desc
+      [.rolename]
+      detached
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '//*[@class="dlist"]/dl', output, 1
+      assert_xpath '//*[@class="dlist"]/following-sibling::*[@class="paragraph rolename"]', output, 1
+    end
+
+    test 'block anchor line breaks list even when term has no inline description' do
       input = <<~'EOS'
       == Lists
 
@@ -4185,6 +4264,89 @@ context 'Description lists redux' do
       assert_xpath '//*[@class="dlist"]//dd', output, 0
       assert_xpath '//*[@class="dlist"]/following-sibling::*[@class="paragraph"]', output, 1
       assert_xpath '//*[@class="dlist"]/following-sibling::*[@class="paragraph"]/p[text()="detached"]', output, 1
+    end
+
+    test 'block attribute lines above nested horizontal list does not break list' do
+      input = <<~'EOS'
+      Operating Systems::
+      [horizontal]
+        Linux::: Fedora
+        BSD::: OpenBSD
+
+      Cloud Providers::
+        PaaS::: OpenShift
+        IaaS::: AWS
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '//dl', output, 2
+      assert_xpath '/*[@class="dlist"]/dl', output, 1
+      assert_xpath '(//dl)[1]/dd', output, 2
+      assert_xpath '((//dl)[1]/dd)[1]//table', output, 1
+      assert_xpath '((//dl)[1]/dd)[2]//table', output, 0
+    end
+
+    test 'block attribute lines above nested list with style does not break list' do
+      input = <<~'EOS'
+      TODO List::
+      * get groceries
+      Grocery List::
+      [square]
+      * bread
+      * milk
+      * lettuce
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '//dl', output, 1
+      assert_xpath '(//dl)[1]/dd', output, 2
+      assert_xpath '((//dl)[1]/dd)[2]//ul[@class="square"]', output, 1
+    end
+
+    test 'multiple block attribute lines above nested list does not break list' do
+      input = <<~'EOS'
+      Operating Systems::
+      [[variants]]
+      [horizontal]
+        Linux::: Fedora
+        BSD::: OpenBSD
+
+      Cloud Providers::
+        PaaS::: OpenShift
+        IaaS::: AWS
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '//dl', output, 2
+      assert_xpath '/*[@class="dlist"]/dl', output, 1
+      assert_xpath '(//dl)[1]/dd', output, 2
+      assert_xpath '(//dl)[1]/dd/*[@id="variants"]', output, 1
+      assert_xpath '((//dl)[1]/dd)[1]//table', output, 1
+      assert_xpath '((//dl)[1]/dd)[2]//table', output, 0
+    end
+
+    test 'multiple block attribute lines separated by empty line above nested list does not break list' do
+      input = <<~'EOS'
+      Operating Systems::
+      [[variants]]
+
+      [horizontal]
+
+        Linux::: Fedora
+        BSD::: OpenBSD
+
+      Cloud Providers::
+        PaaS::: OpenShift
+        IaaS::: AWS
+      EOS
+
+      output = convert_string_to_embedded input
+      assert_xpath '//dl', output, 2
+      assert_xpath '/*[@class="dlist"]/dl', output, 1
+      assert_xpath '(//dl)[1]/dd', output, 2
+      assert_xpath '(//dl)[1]/dd/*[@id="variants"]', output, 1
+      assert_xpath '((//dl)[1]/dd)[1]//table', output, 1
+      assert_xpath '((//dl)[1]/dd)[2]//table', output, 0
     end
   end
 

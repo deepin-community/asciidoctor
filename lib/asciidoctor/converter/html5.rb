@@ -626,16 +626,18 @@ Your browser does not support the audio tag.
     target = node.attr 'target'
     width_attr = (node.attr? 'width') ? %( width="#{node.attr 'width'}") : ''
     height_attr = (node.attr? 'height') ? %( height="#{node.attr 'height'}") : ''
-    if ((node.attr? 'format', 'svg') || (target.include? '.svg')) && node.document.safe < SafeMode::SECURE &&
-        ((svg = (node.option? 'inline')) || (obj = (node.option? 'interactive')))
-      if svg
+    if ((node.attr? 'format', 'svg') || (target.include? '.svg')) && node.document.safe < SafeMode::SECURE
+      if node.option? 'inline'
         img = (read_svg_contents node, target) || %(<span class="alt">#{node.alt}</span>)
-      elsif obj
-        fallback = (node.attr? 'fallback') ? %(<img src="#{node.image_uri(node.attr 'fallback')}" alt="#{encode_attribute_value node.alt}"#{width_attr}#{height_attr}#{@void_element_slash}>) : %(<span class="alt">#{node.alt}</span>)
+      elsif node.option? 'interactive'
+        fallback = (node.attr? 'fallback') ? %(<img src="#{node.image_uri node.attr 'fallback'}" alt="#{encode_attribute_value node.alt}"#{width_attr}#{height_attr}#{@void_element_slash}>) : %(<span class="alt">#{node.alt}</span>)
         img = %(<object type="image/svg+xml" data="#{node.image_uri target}"#{width_attr}#{height_attr}>#{fallback}</object>)
+      else
+        img = %(<img src="#{node.image_uri target}" alt="#{encode_attribute_value node.alt}"#{width_attr}#{height_attr}#{@void_element_slash}>)
       end
+    else
+      img = %(<img src="#{node.image_uri target}" alt="#{encode_attribute_value node.alt}"#{width_attr}#{height_attr}#{@void_element_slash}>)
     end
-    img ||= %(<img src="#{node.image_uri target}" alt="#{encode_attribute_value node.alt}"#{width_attr}#{height_attr}#{@void_element_slash}>)
     img = %(<a class="image" href="#{node.attr 'link'}"#{(append_link_constraint_attrs node).join}>#{img}</a>) if node.attr? 'link'
     id_attr = node.id ? %( id="#{node.id}") : ''
     classes = ['imageblock']
@@ -673,7 +675,7 @@ Your browser does not support the audio tag.
     title_element = node.title? ? %(<div class="title">#{node.captioned_title}</div>\n) : ''
     %(<div#{id_attribute} class="listingblock#{(role = node.role) ? " #{role}" : ''}">
 #{title_element}<div class="content">
-#{syntax_hl ? (syntax_hl.format node, lang, opts) : pre_open + (node.content || '') + pre_close}
+#{syntax_hl ? (syntax_hl.format node, lang, opts) : pre_open + node.content + pre_close}
 </div>
 </div>)
   end
@@ -746,7 +748,7 @@ Your browser does not support the audio tag.
   def convert_open node
     if (style = node.style) == 'abstract'
       if node.parent == node.document && node.document.doctype == 'book'
-        logger.warn 'abstract block cannot be used in a document without a title when doctype is book. Excluding block content.'
+        logger.warn 'abstract block cannot be used in a document without a doctitle when doctype is book. Excluding block content.'
         ''
       else
         id_attr = node.id ? %( id="#{node.id}") : ''
@@ -859,20 +861,19 @@ Your browser does not support the audio tag.
     if (stripes = node.attr 'stripes', nil, 'table-stripes')
       classes << %(stripes-#{stripes})
     end
-    styles = []
+    style_attribute = ''
     if (autowidth = node.option? 'autowidth') && !(node.attr? 'width')
       classes << 'fit-content'
     elsif (tablewidth = node.attr 'tablepcwidth') == 100
       classes << 'stretch'
     else
-      styles << %(width: #{tablewidth}%;)
+      style_attribute = %( style="width: #{tablewidth}%;")
     end
     classes << (node.attr 'float') if node.attr? 'float'
     if (role = node.role)
       classes << role
     end
     class_attribute = %( class="#{classes.join ' '}")
-    style_attribute = styles.empty? ? '' : %( style="#{styles.join ' '}")
 
     result << %(<table#{id_attribute}#{class_attribute}#{style_attribute}>)
     result << %(<caption class="title">#{node.captioned_title}</caption>) if node.title?
@@ -1035,12 +1036,14 @@ Your browser does not support the audio tag.
       end
       start_anchor = (node.attr? 'start') ? %(#at=#{node.attr 'start'}) : ''
       delimiter = ['?']
+      target, hash = (node.attr 'target').split '/', 2
+      hash_param = (hash ||= node.attr 'hash') ? %(#{delimiter.pop || '&amp;'}h=#{hash}) : ''
       autoplay_param = (node.option? 'autoplay') ? %(#{delimiter.pop || '&amp;'}autoplay=1) : ''
       loop_param = (node.option? 'loop') ? %(#{delimiter.pop || '&amp;'}loop=1) : ''
       muted_param = (node.option? 'muted') ? %(#{delimiter.pop || '&amp;'}muted=1) : ''
       %(<div#{id_attribute}#{class_attribute}>#{title_element}
 <div class="content">
-<iframe#{width_attribute}#{height_attribute} src="#{asset_uri_scheme}//player.vimeo.com/video/#{node.attr 'target'}#{autoplay_param}#{loop_param}#{muted_param}#{start_anchor}" frameborder="0"#{(node.option? 'nofullscreen') ? '' : (append_boolean_attribute 'allowfullscreen', xml)}></iframe>
+<iframe#{width_attribute}#{height_attribute} src="#{asset_uri_scheme}//player.vimeo.com/video/#{target}#{hash_param}#{autoplay_param}#{loop_param}#{muted_param}#{start_anchor}" frameborder="0"#{(node.option? 'nofullscreen') ? '' : (append_boolean_attribute 'allowfullscreen', xml)}></iframe>
 </div>
 </div>)
     when 'youtube'
@@ -1076,7 +1079,7 @@ Your browser does not support the audio tag.
         target, playlist = target.split ',', 2
         if (playlist ||= (node.attr 'playlist'))
           # INFO playlist bar doesn't appear in Firefox unless showinfo=1 and modestbranding=1
-          list_param = %(&amp;playlist=#{playlist})
+          list_param = %(&amp;playlist=#{target},#{playlist})
         else
           # NOTE for loop to work, playlist must be specified; use VIDEO_ID if there's no explicit playlist
           list_param = has_loop_param ? %(&amp;playlist=#{target}) : ''
@@ -1180,44 +1183,49 @@ Your browser does not support the video tag.
   end
 
   def convert_inline_image node
-    if (type = node.type || 'image') == 'icon' && (node.document.attr? 'icons', 'font')
-      class_attr_val = %(fa fa-#{node.target})
-      { 'size' => 'fa-', 'rotate' => 'fa-rotate-', 'flip' => 'fa-flip-' }.each do |key, prefix|
-        class_attr_val = %(#{class_attr_val} #{prefix}#{node.attr key}) if node.attr? key
-      end
-      title_attr = (node.attr? 'title') ? %( title="#{node.attr 'title'}") : ''
-      img = %(<i class="#{class_attr_val}"#{title_attr}></i>)
-    elsif type == 'icon' && !(node.document.attr? 'icons')
-      img = %([#{node.alt}])
-    else
-      target = node.target
-      attrs = []
-      attrs << %( width="#{node.attr 'width'}") if node.attr? 'width'
-      attrs << %( height="#{node.attr 'height'}") if node.attr? 'height'
-      attrs << %( title="#{node.attr 'title'}") if node.attr? 'title'
-      attrs = attrs.empty? ? '' : attrs.join
-      if type != 'icon' && ((node.attr? 'format', 'svg') || (target.include? '.svg')) &&
-          node.document.safe < SafeMode::SECURE && ((svg = (node.option? 'inline')) || (obj = (node.option? 'interactive')))
-        if svg
-          img = (read_svg_contents node, target) || %(<span class="alt">#{node.alt}</span>)
-        elsif obj
-          fallback = (node.attr? 'fallback') ? %(<img src="#{node.image_uri(node.attr 'fallback')}" alt="#{encode_attribute_value node.alt}"#{attrs}#{@void_element_slash}>) : %(<span class="alt">#{node.alt}</span>)
-          img = %(<object type="image/svg+xml" data="#{node.image_uri target}"#{attrs}>#{fallback}</object>)
+    target = node.target
+    if (type = node.type || 'image') == 'icon'
+      if (icons = node.document.attr 'icons') == 'font'
+        i_class_attr_val = %(fa fa-#{target})
+        i_class_attr_val = %(#{i_class_attr_val} fa-#{node.attr 'size'}) if node.attr? 'size'
+        if node.attr? 'flip'
+          i_class_attr_val = %(#{i_class_attr_val} fa-flip-#{node.attr 'flip'})
+        elsif node.attr? 'rotate'
+          i_class_attr_val = %(#{i_class_attr_val} fa-rotate-#{node.attr 'rotate'})
         end
+        attrs = (node.attr? 'title') ? %( title="#{node.attr 'title'}") : ''
+        img = %(<i class="#{i_class_attr_val}"#{attrs}></i>)
+      elsif icons
+        attrs = (node.attr? 'width') ? %( width="#{node.attr 'width'}") : ''
+        attrs = %(#{attrs} height="#{node.attr 'height'}") if node.attr? 'height'
+        attrs = %(#{attrs} title="#{node.attr 'title'}") if node.attr? 'title'
+        img = %(<img src="#{node.icon_uri target}" alt="#{encode_attribute_value node.alt}"#{attrs}#{@void_element_slash}>)
+      else
+        img = %([#{node.alt}&#93;)
       end
-      img ||= %(<img src="#{type == 'icon' ? (node.icon_uri target) : (node.image_uri target)}" alt="#{encode_attribute_value node.alt}"#{attrs}#{@void_element_slash}>)
+    else
+      attrs = (node.attr? 'width') ? %( width="#{node.attr 'width'}") : ''
+      attrs = %(#{attrs} height="#{node.attr 'height'}") if node.attr? 'height'
+      attrs = %(#{attrs} title="#{node.attr 'title'}") if node.attr? 'title'
+      if ((node.attr? 'format', 'svg') || (target.include? '.svg')) && node.document.safe < SafeMode::SECURE
+        if node.option? 'inline'
+          img = (read_svg_contents node, target) || %(<span class="alt">#{node.alt}</span>)
+        elsif node.option? 'interactive'
+          fallback = (node.attr? 'fallback') ? %(<img src="#{node.image_uri node.attr 'fallback'}" alt="#{encode_attribute_value node.alt}"#{attrs}#{@void_element_slash}>) : %(<span class="alt">#{node.alt}</span>)
+          img = %(<object type="image/svg+xml" data="#{node.image_uri target}"#{attrs}>#{fallback}</object>)
+        else
+          img = %(<img src="#{node.image_uri target}" alt="#{encode_attribute_value node.alt}"#{attrs}#{@void_element_slash}>)
+        end
+      else
+        img = %(<img src="#{node.image_uri target}" alt="#{encode_attribute_value node.alt}"#{attrs}#{@void_element_slash}>)
+      end
     end
     img = %(<a class="image" href="#{node.attr 'link'}"#{(append_link_constraint_attrs node).join}>#{img}</a>) if node.attr? 'link'
+    class_attr_val = type
     if (role = node.role)
-      if node.attr? 'float'
-        class_attr_val = %(#{type} #{node.attr 'float'} #{role})
-      else
-        class_attr_val = %(#{type} #{role})
-      end
+      class_attr_val = (node.attr? 'float') ? %(#{class_attr_val} #{node.attr 'float'} #{role}) : %(#{class_attr_val} #{role})
     elsif node.attr? 'float'
-      class_attr_val = %(#{type} #{node.attr 'float'})
-    else
-      class_attr_val = type
+      class_attr_val = %(#{class_attr_val} #{node.attr 'float'})
     end
     %(<span class="#{class_attr_val}">#{img}</span>)
   end

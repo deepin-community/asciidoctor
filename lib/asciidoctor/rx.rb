@@ -89,7 +89,7 @@ module Asciidoctor
   #   include::chapter1.ad[]
   #   include::example.txt[lines=1;2;5..10]
   #
-  IncludeDirectiveRx = /^(\\)?include::([^\[][^\[]*)\[(#{CC_ANY}+)?\]$/
+  IncludeDirectiveRx = /^(\\)?include::([^\s\[](?:[^\[]*[^\s\[])?)\[(#{CC_ANY}+)?\]$/
 
   # Matches a trailing tag directive in an include file.
   #
@@ -103,6 +103,7 @@ module Asciidoctor
   #   }
   #   // end::try-catch[]
   # NOTE m flag is required for Asciidoctor.js
+  # NOTE the regex checks for \r to account of include files that use Windows newlines
   TagDirectiveRx = /\b(?:tag|(e)nd)::(\S+?)\[\](?=$|[ \r])/m
 
   ## Attribute entries and references
@@ -407,7 +408,7 @@ module Asciidoctor
   #   gist::123456[]
   #
   #--
-  # NOTE we've relaxed the match for target to accomodate the short format (e.g., name::[attrlist])
+  # NOTE we've relaxed the match for target to accommodate the short format (e.g., name::[attrlist])
   CustomBlockMacroRx = /^(#{CG_WORD}[#{CC_WORD}-]*)::(|\S|\S#{CC_ANY}*?\S)\[(#{CC_ANY}+)?\]$/
 
   # Matches an image, video or audio block macro.
@@ -513,12 +514,17 @@ module Asciidoctor
   #
   #   https://github.com
   #   https://github.com[GitHub]
-  #   <https://github.com>
+  #   <https://github.com> <= angle brackets not included in autolink
   #   link:https://github.com[]
   #   "https://github.com[]"
+  #   (https://github.com) <= parenthesis not included in autolink
   #
-  # FIXME revisit! the main issue is we need different rules for implicit vs explicit
-  InlineLinkRx = %r((^|link:|#{CG_BLANK}|&lt;|[>\(\)\[\];"'])(\\?(?:https?|file|ftp|irc)://[^\s\[\]<]*([^\s.,\[\]<]))(?:\[(|#{CC_ALL}*?[^\\])\])?)m
+  if RUBY_ENGINE == 'opal'
+    # NOTE In JavaScript, a back reference succeeds if not set; invert the logic to give it a match to refute
+    InlineLinkRx = %r((^|link:|#{CG_BLANK}|\\?&lt;(?=\\?(?:https?|file|ftp|irc)(:))|[>\(\)\[\];"'])(\\?(?:https?|file|ftp|irc)://)(?:([^\s\[\]]+)\[(|#{CC_ALL}*?[^\\])\]|(?!\2)([^\s]+?)&gt;|([^\s\[\]<]*([^\s,.?!\[\]<\)]))))
+  else
+    InlineLinkRx = %r((^|link:|#{CG_BLANK}|\\?&lt;()|[>\(\)\[\];"'])(\\?(?:https?|file|ftp|irc)://)(?:([^\s\[\]]+)\[(|#{CC_ALL}*?[^\\])\]|\2([^\s]+?)&gt;|([^\s\[\]<]*([^\s,.?!\[\]<\)]))))m
+  end
 
   # Match a link or e-mail inline macro.
   #
@@ -568,22 +574,16 @@ module Asciidoctor
   # Examples
   #
   #   +text+
-  #   `text` (compat)
+  #   [x-]+text+
+  #   [x-]`text`
+  #   `text` (compat only)
+  #   [role]`text` (compat only)
   #
   # NOTE we always capture the attributes so we know when to use compatible (i.e., legacy) behavior
   InlinePassRx = {
-    false => ['+', '`', /(^|[^#{CC_WORD};:])(?:\[([^\]]+)\])?(\\?(\+|`)(\S|\S#{CC_ALL}*?\S)\4)(?!#{CG_WORD})/m],
-    true  => ['`', nil, /(^|[^`#{CC_WORD}])(?:\[([^\]]+)\])?(\\?(`)([^`\s]|[^`\s]#{CC_ALL}*?\S)\4)(?![`#{CC_WORD}])/m]
+    false => ['+', '-]', /((?:^|[^#{CC_WORD};:\\])(?=(\[)|\+)|\\(?=\[)|(?=\\\+))(?:\2(x-|[^\]]+ x-)\]|(?:\[([^\]]+)\])?(?=(\\)?\+))(\5?(\+|`)(\S|\S#{CC_ALL}*?\S)\7)(?!#{CG_WORD})/m],
+    true => ['`', nil, /(^|[^`#{CC_WORD}])(?:(\Z)()|\[([^\]]+)\](?=(\\))?)?(\5?(`)([^`\s]|[^`\s]#{CC_ALL}*?\S)\7)(?![`#{CC_WORD}])/m],
   }
-
-  # Matches an inline plus passthrough spanning multiple lines, but only when it occurs directly
-  # inside constrained monospaced formatting in non-compat mode.
-  #
-  # Examples
-  #
-  #   +text+
-  #
-  SinglePlusInlinePassRx = /^(\\)?\+(\S|\S#{CC_ALL}*?\S)\+$/m
 
   # Matches several variants of the passthrough inline macro, which may span multiple lines.
   #
@@ -716,7 +716,11 @@ module Asciidoctor
   #
   #   not c:/sample.adoc or c:\sample.adoc
   #
-  UriSniffRx = %r(^#{CG_ALPHA}[#{CC_ALNUM}.+-]+:/{0,2})
+  if RUBY_ENGINE == 'opal'
+    UriSniffRx = %r(^#{CG_ALPHA}[#{CC_ALNUM}.+-]+:/{0,2})
+  else
+    UriSniffRx = %r(\A#{CG_ALPHA}[#{CC_ALNUM}.+-]+:/{0,2})
+  end
 
   # Detects XML tags
   XmlSanitizeRx = /<[^>]+>/

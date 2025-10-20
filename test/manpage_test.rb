@@ -46,6 +46,24 @@ context 'Manpage' do
       assert_includes output.lines, %(command, alt_command \\- does stuff\n)
     end
 
+    test 'should replace invalid characters in mantitle in info comment' do
+      input = <<~'EOS'
+      = foo\--<bar> (1)
+      Author Name
+      :doctype: manpage
+      :man manual: Foo Bar Manual
+      :man source: Foo Bar 1.0
+
+      == NAME
+
+      foo-bar - puts the foo in your bar
+      EOS
+
+      doc = Asciidoctor.load input, backend: :manpage, standalone: true
+      output = doc.convert
+      assert_includes output, %(Title: foo--bar\n)
+    end
+
     test 'should substitute attributes in manname and manpurpose in NAME section' do
       input = <<~'EOS'
       = {cmdname} (1)
@@ -128,8 +146,8 @@ context 'Manpage' do
         assert_equal ['cmd'], doc.attr('mannames')
         assert_equal '.1', doc.attr('outfilesuffix')
         output = doc.convert
-        refute logger.messages.empty?
-        assert_includes output, 'Title: cmd'
+        refute_empty logger.messages
+        assert_includes output, %(Title: cmd\n)
         assert output.end_with?('garbage in')
       end
     end
@@ -330,6 +348,83 @@ context 'Manpage' do
       assert_includes output, %(Oh, here it goes again\nI should have known,\nshould have known,\nshould have known again)
     end
 
+    test 'should escape repeated spaces in literal content' do
+      input = <<~EOS.chop
+      #{SAMPLE_MANPAGE_HEADER}
+
+      ....
+      \x20 ,---.          ,-----.
+      \x20 |Bob|          |Alice|
+      \x20 `-+-'          `--+--'
+      \x20   |    hello      |
+      \x20   |-------------->|
+      \x20 ,-+-.          ,--+--.
+      \x20 |Bob|          |Alice|
+      \x20 `---'          `-----'
+      ....
+      EOS
+
+      output = Asciidoctor.convert input, backend: :manpage
+      expects = <<~'EOS'.lines.map {|it| (' ' * it.chr.to_i) + (it.slice 1, it.length) }.join
+      0.fam C
+      2,\-\-\-.\&          ,\-\-\-\-\-.
+      2|Bob|\&          |Alice|
+      2`\-+\-\*(Aq\&          `\-\-+\-\-\*(Aq
+      4|\&    hello\&      |
+      4|\-\-\-\-\-\-\-\-\-\-\-\-\-\->|
+      2,\-+\-.\&          ,\-\-+\-\-.
+      2|Bob|\&          |Alice|
+      2`\-\-\-\*(Aq\&          `\-\-\-\-\-\*(Aq
+      0.fam
+      EOS
+      assert_includes output, expects
+    end
+
+    test 'should preserve break between paragraphs in normal table cell' do
+      input = <<~EOS.chop
+      #{SAMPLE_MANPAGE_HEADER}
+
+      [cols=3*]
+      |===
+      |single paragraph
+      |first paragraph
+
+      second paragraph
+      |foo
+
+      more foo
+
+      even more foo
+      |===
+      EOS
+
+      expected_coda = <<~'EOS'.chop
+      .TS
+      allbox tab(:);
+      lt lt lt.
+      T{
+      .sp
+      single paragraph
+      T}:T{
+      .sp
+      first paragraph
+      .sp
+      second paragraph
+      T}:T{
+      .sp
+      foo
+      .sp
+      more foo
+      .sp
+      even more foo
+      T}
+      .TE
+      .sp
+      EOS
+      output = Asciidoctor.convert input, backend: :manpage
+      assert output.end_with? expected_coda
+    end
+
     test 'should normalize whitespace in a list item' do
       input = <<~EOS.chop
       #{SAMPLE_MANPAGE_HEADER}
@@ -384,6 +479,18 @@ context 'Manpage' do
       EOS
       output = Asciidoctor.convert input, backend: :manpage
       assert_includes output, '.SH "\(lqMAIN\(rq \fI<OPTIONS>\fP"'
+    end
+
+    test 'should not uppercase monospace span in section titles' do
+      input = <<~EOS.chop
+      #{SAMPLE_MANPAGE_HEADER}
+
+      does stuff
+
+      == `show` option
+      EOS
+      output = Asciidoctor.convert input, backend: :manpage
+      assert_includes output, '.SH "\f(CRshow\fP OPTION"'
     end
   end
 
@@ -630,11 +737,13 @@ context 'Manpage' do
       EOS
       expected_coda = <<~'EOS'.chop
       allbox tab(:);
-      lt.
+      ltB.
       T{
       .sp
       Header
       T}
+      .T&
+      lt.
       T{
       .sp
       Body 1
@@ -690,7 +799,7 @@ context 'Manpage' do
       .B Table 1. Table of options
       .TS
       allbox tab(:);
-      lt lt lt.
+      ltB ltB ltB.
       T{
       .sp
       Name
@@ -701,6 +810,8 @@ context 'Manpage' do
       .sp
       Default
       T}
+      .T&
+      lt lt lt.
       T{
       .sp
       dim
@@ -739,7 +850,7 @@ context 'Manpage' do
       .sp
       .nf
       b
-      c    _d_
+      c\&    _d_
       \&.
       .fi
       T}
@@ -763,6 +874,17 @@ context 'Manpage' do
 
       output = Asciidoctor.convert input, backend: :manpage
       assert output.end_with? %(\n.sp\n[signs point to yes])
+    end
+
+    test 'should manify alt text of block image' do
+      input = <<~EOS.chop
+      #{SAMPLE_MANPAGE_HEADER}
+
+      image::rainbow.jpg["That's a double rainbow, otherwise known as rainbow{pp}!"]
+      EOS
+
+      output = Asciidoctor.convert input, backend: :manpage
+      assert output.end_with? %/\n.sp\n[That\\(cqs a double rainbow, otherwise known as rainbow++!]/
     end
 
     test 'should replace inline image with alt text enclosed in square brackets' do
@@ -1056,7 +1178,7 @@ context 'Manpage' do
       assert_includes output, 'The options listed in Generic Program Information should always be used by themselves.'
     end
 
-    test 'should uppercase the reftext for level-2 section titles if the reftext matches the secton title' do
+    test 'should uppercase the reftext for level-2 section titles if the reftext matches the section title' do
       input = <<~EOS.chop
       #{SAMPLE_MANPAGE_HEADER}
 

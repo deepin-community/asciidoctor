@@ -344,6 +344,19 @@ context 'Extensions' do
       end
     end
 
+    test 'should not fail to unregister extension group if not registered' do
+      refute_nil Asciidoctor::Extensions.groups
+      assert_equal 0, Asciidoctor::Extensions.groups.size
+      Asciidoctor::Extensions.unregister :sample
+      assert_equal 0, Asciidoctor::Extensions.groups.size
+    end
+
+    test 'should not fail to unregister extension group if extension groups are not initialized' do
+      Asciidoctor::Extensions.remove_instance_variable :@groups
+      Asciidoctor::Extensions.unregister :sample
+      assert_equal 0, Asciidoctor::Extensions.groups.size
+    end
+
     test 'should raise NameError if extension class cannot be resolved from string' do
       begin
         Asciidoctor::Extensions.register do
@@ -352,7 +365,7 @@ context 'Extensions' do
         empty_document
         flunk 'Expecting RuntimeError to be raised'
       rescue NameError => e
-        assert_equal 'Could not resolve class for name: foobar', e.message
+        assert_match %r/^Could not resolve class for name: foobar$/, e.message
       ensure
         Asciidoctor::Extensions.unregister_all
       end
@@ -387,6 +400,27 @@ context 'Extensions' do
         registry.activate doc
         assert doc.attr? 'activate-method-called'
         assert registry.preprocessors?
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
+    test 'should reset registry if activate is called again' do
+      begin
+        Asciidoctor::Extensions.register :sample, SampleExtensionGroup
+        doc = Asciidoctor::Document.new
+        registry = Asciidoctor::Extensions::Registry.new
+        registry.activate doc
+        assert doc.attr? 'activate-method-called'
+        assert registry.preprocessors?
+        assert_equal 1, registry.preprocessors.size
+        assert_same doc, registry.document
+        doc = Asciidoctor::Document.new
+        registry.activate doc
+        assert doc.attr? 'activate-method-called'
+        assert registry.preprocessors?
+        assert_equal 1, registry.preprocessors.size
+        assert_same doc, registry.document
       ensure
         Asciidoctor::Extensions.unregister_all
       end
@@ -960,6 +994,28 @@ context 'Extensions' do
 
         convert_string_to_embedded input
         assert_equal :sidebar, cloaked_context
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
+    test 'should allow extension to promote paragraph to compound block' do
+      input = <<~'EOS'
+      [ex]
+      example
+      EOS
+      begin
+        Asciidoctor::Extensions.register do
+          block :ex do
+            on_context :paragraph
+            process do |parent, reader|
+              create_example_block parent, reader.read_lines, {}, content_model: :compound
+            end
+          end
+        end
+
+        output = convert_string_to_embedded input
+        assert_css '.exampleblock .paragraph', output, 1
       ensure
         Asciidoctor::Extensions.unregister_all
       end
@@ -1576,6 +1632,61 @@ context 'Extensions' do
       end
     end
 
+    test 'should ignore return value of custom block if value is parent' do
+      begin
+        Asciidoctor::Extensions.register do
+          block do
+            named :unwrap
+            on_context :open
+            process do |parent, reader|
+              parse_content parent, reader.read_lines
+            end
+          end
+        end
+        input = <<~'EOS'
+        [unwrap]
+        --
+        a
+
+        b
+
+        c
+        --
+        EOS
+        doc = document_from_string input
+        assert_equal 3, doc.blocks.size
+        doc.blocks.each do |block|
+          assert_equal :paragraph, block.context
+        end
+        assert_equal 'a', doc.blocks[0].source
+        assert_css 'p', doc.convert, 3
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
+    test 'should ignore return value of custom block macro if value is parent' do
+      begin
+        Asciidoctor::Extensions.register do
+          block_macro :para do
+            process do |parent, target|
+              parse_content parent, target
+            end
+          end
+        end
+        input = <<~'EOS'
+        para::text[]
+        EOS
+        doc = document_from_string input
+        assert_equal 1, doc.blocks.size
+        assert_equal :paragraph, doc.blocks[0].context
+        assert_equal 'text', doc.blocks[0].source
+        assert_css 'p', doc.convert, 1
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
     test 'parse_content should not share attributes between parsed blocks' do
       begin
         Asciidoctor::Extensions.register do
@@ -1609,6 +1720,107 @@ context 'Extensions' do
         assert_equal 2, wrap.blocks[0].attributes.size
         assert_equal 2, wrap.blocks[1].attributes.size
         assert_nil wrap.blocks[1].attributes['foo']
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
+    test 'should allow extension to replace custom block with a list' do
+      begin
+        Asciidoctor::Extensions.register do
+          block do
+            named :lst
+            on_context :paragraph
+            process do |parent, reader|
+              reader.read_lines.each_with_object create_list parent, :ulist do |line, list|
+                list << (create_list_item list, line)
+              end
+            end
+          end
+        end
+        input = <<~'EOS'
+        before
+
+        [lst]
+        a
+        b
+        c
+
+        after
+        EOS
+        doc = document_from_string input
+        assert_equal 3, doc.blocks.size
+        list = doc.blocks[1]
+        assert_equal :ulist, list.context
+        assert_equal 3, list.items.size
+        assert_equal 'a', list.items[0].text
+        assert_css 'li', doc.convert, 3
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
+    test 'should allow extension to replace custom block with a section' do
+      begin
+        Asciidoctor::Extensions.register do
+          block do
+            named :sect
+            on_context :open
+            process do |parent, _, attrs|
+              create_section parent, attrs['title'], {}
+            end
+          end
+        end
+        input = <<~'EOS'
+        .Section Title
+        [sect]
+        --
+        a
+
+        b
+        --
+        EOS
+        doc = document_from_string input
+        assert_equal 1, doc.blocks.size
+        sect = doc.blocks[0]
+        assert_equal :section, sect.context
+        assert_equal 'Section Title', sect.title
+        assert_equal 2, sect.blocks.size
+        assert_equal :paragraph, sect.blocks[0].context
+        assert_equal :paragraph, sect.blocks[1].context
+        assert_css 'p', doc.convert, 2
+      ensure
+        Asciidoctor::Extensions.unregister_all
+      end
+    end
+
+    test 'can use parse_content to append blocks to current parent' do
+      begin
+        Asciidoctor::Extensions.register do
+          block do
+            named :csv
+            on_context :literal
+            process do |parent, reader|
+              parse_content parent, [',==='] + reader.read_lines + [',===']
+              nil
+            end
+          end
+        end
+        input = <<~'EOS'
+        before
+
+        [csv]
+        ....
+        a,b,c
+        ....
+
+        after
+        EOS
+        doc = document_from_string input
+        assert_equal 3, doc.blocks.size
+        table = doc.blocks[1]
+        assert_equal :table, table.context
+        assert_css 'td', doc.convert, 3
       ensure
         Asciidoctor::Extensions.unregister_all
       end
@@ -1785,12 +1997,54 @@ context 'Extensions' do
       end
     end
 
+    test 'should raise exception if document processor extension does not provide process method' do
+      extension_registry = Asciidoctor::Extensions.create do
+        tree_processor do # rubocop:disable Lint/EmptyBlock
+        end
+      end
+      exception = assert_raises NoMethodError do
+        convert_string_to_embedded 'content', extension_registry: extension_registry
+      end
+      assert_match %r/No block specified to process tree processor extension at .*extensions_test\.rb:\d+/, exception.message
+    end
+
+    test 'should raise exception if syntax processor extension does not provide process method' do
+      extension_registry = Asciidoctor::Extensions.create do
+        block_macro :foo do # rubocop:disable Lint/EmptyBlock
+        end
+      end
+      exception = assert_raises NoMethodError do
+        convert_string_to_embedded 'foo::bar[]', extension_registry: extension_registry
+      end
+      assert_match %r/No block specified to process block macro extension at .*extensions_test\.rb:\d+/, exception.message
+    end
+
+    test 'should raise exception if syntax processor extension does not provide a name' do
+      macro_name = (Class.new String do
+        def to_sym
+          nil
+        end
+      end).new 'foo'
+      extension_registry = Asciidoctor::Extensions.create do
+        block_macro do
+          named macro_name
+          process do
+            nil
+          end
+        end
+      end
+      exception = assert_raises ArgumentError do
+        convert_string_to_embedded 'foo::bar[]', extension_registry: extension_registry
+      end
+      assert_match %r/No name specified for block macro extension at .*extensions_test\.rb:\d+/, exception.message
+    end
+
     test 'should raise an exception if mandatory target attribute is not provided for image block' do
       input = 'cat_in_sink::[]'
       exception = assert_raises ArgumentError do
         convert_string_to_embedded input, extension_registry: create_cat_in_sink_block_macro
       end
-      assert_match(/target attribute is required/, exception.message)
+      assert_match %r/target attribute is required/, exception.message
     end
 
     test 'should assign alt attribute to image block if alt is not provided' do

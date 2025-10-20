@@ -19,7 +19,7 @@ module Asciidoctor
         when Options
           @options = first_option
         when ::Hash
-          @options = Options.new options
+          @options = Options.new first_option
         else
           if ::Integer === (result = Options.parse! options)
             @code = result
@@ -142,7 +142,7 @@ module Asciidoctor
             raise e
           else
             err.puts ::RuntimeError === e ? %(#{e.message} (#{e.class})) : e.message
-            err.puts '  Use --trace for backtrace'
+            err.puts '  Use --trace to show backtrace'
           end
         end
         nil

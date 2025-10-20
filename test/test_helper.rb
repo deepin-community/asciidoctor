@@ -265,6 +265,10 @@ class Minitest::Test
     [number].pack 'U1'
   end
 
+  def haml_template_class
+    (defined? Haml::Template) ? Haml::Template : Tilt::HamlTemplate
+  end
+
   def invoke_cli_with_filenames argv = [], filenames = [], &block
     filepaths = []
 
@@ -356,7 +360,7 @@ class Minitest::Test
       #if jruby? && (Gem::Version.new JRUBY_VERSION) < (Gem::Version.new '9.2.10.0')
       if jruby?
         begin
-          old_env, env = ENV.merge, (ENV.merge env)
+          env = (old_env = ENV.to_h).merge env
           env.each {|key, val| env.delete key if val.nil? } if env.value? nil
           ENV.replace env
           popen [cmd, *args, opts], &block
@@ -393,8 +397,9 @@ class Minitest::Test
     base_dir = testdir
     server = TCPServer.new host, port
     server_thread = Thread.start do
+      Thread.current[:requests] = requests = []
       while (session = server.accept)
-        request = session.gets
+        requests << (request = session.gets)
         if /^GET (\S+) HTTP\/1\.1$/ =~ request.chomp
           resource = (resource = $1) == '' ? '.' : resource
         else
@@ -414,10 +419,7 @@ class Minitest::Test
           end
           session.print %(HTTP/1.1 200 OK\r\nContent-Type: #{mimetype}\r\n\r\n)
           File.open resource_file, Asciidoctor::FILE_READ_MODE do |fd|
-            until fd.eof?
-              buffer = fd.read 256
-              session.write buffer
-            end
+            session.write fd.read 256 until fd.eof?
           end
         else
           session.print %(HTTP/1.1 404 File Not Found\r\nContent-Type: text/plain\r\n\r\n)
@@ -427,7 +429,7 @@ class Minitest::Test
       end
     end
     begin
-      yield
+      yield %(http://#{host}:#{port}), server_thread
     ensure
       server_thread.exit
       server_thread.value

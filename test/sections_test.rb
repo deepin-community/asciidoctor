@@ -194,6 +194,51 @@ context 'Sections' do
       assert_equal 'Section One <a id="one"></a>', sec.title
     end
 
+    test 'should apply substititons to title with attribute references when registering section with auto-generated ID' do
+      input = <<~'EOS'
+      = Document Title
+      :foo: bar
+
+      See <<_section_baz>>.
+
+      :foo: baz
+
+      == Section {foo}
+
+      That's all, folks!
+      EOS
+
+      doc = document_from_string input
+      ref = doc.catalog[:refs]['_section_baz']
+      refute_nil ref
+      output = doc.convert standalone: false
+      assert_xpath '//a[@href="#_section_baz"][text()="Section baz"]', output, 1
+      assert_xpath '//h2[@id="_section_baz"][text()="Section baz"]', output, 1
+    end
+
+    test 'should apply substititons to title with attribute references when registering section with explicit ID' do
+      input = <<~'EOS'
+      = Document Title
+      :foo: bar
+
+      See <<explicit>>.
+
+      :foo: baz
+
+      [#explicit]
+      == Section {foo}
+
+      That's all, folks!
+      EOS
+
+      doc = document_from_string input
+      ref = doc.catalog[:refs]['explicit']
+      refute_nil ref
+      output = doc.convert standalone: false
+      assert_xpath '//a[@href="#explicit"][text()="Section baz"]', output, 1
+      assert_xpath '//h2[@id="explicit"][text()="Section baz"]', output, 1
+    end
+
     test 'title substitutions are applied before generating id' do
       sec = block_from_string("== Section{sp}One\n")
       assert_equal '_section_one', sec.id
@@ -1225,16 +1270,16 @@ context 'Sections' do
   context 'Level offset' do
     test 'should print error if standalone document is included without level offset' do
       input = <<~'EOS'
-      = Master Document
+      = Main Document
       Doc Writer
 
-      text in master
+      text in main document
 
       // begin simulated include::[]
       = Standalone Document
       :author: Junior Writer
 
-      text in standalone
+      text in standalone document
 
       // end simulated include::[]
       EOS
@@ -1247,10 +1292,10 @@ context 'Sections' do
 
     test 'should add level offset to section level' do
       input = <<~'EOS'
-      = Master Document
+      = Main Document
       Doc Writer
 
-      Master document written by {author}.
+      Main document written by {author}.
 
       :leveloffset: 1
 
@@ -1267,9 +1312,9 @@ context 'Sections' do
 
       :leveloffset!:
 
-      == Section in Master
+      == Section in Main
 
-      Master section text.
+      Main section text.
       EOS
 
       output = nil
@@ -1278,16 +1323,16 @@ context 'Sections' do
         assert logger.empty?
       end
 
-      assert_match(/Master document written by Doc Writer/, output)
+      assert_match(/Main document written by Doc Writer/, output)
       assert_match(/Standalone document written by Junior Writer/, output)
       assert_xpath '//*[@class="sect1"]/h2[text() = "Standalone Document"]', output, 1
       assert_xpath '//*[@class="sect2"]/h3[text() = "Section in Standalone"]', output, 1
-      assert_xpath '//*[@class="sect1"]/h2[text() = "Section in Master"]', output, 1
+      assert_xpath '//*[@class="sect1"]/h2[text() = "Section in Main"]', output, 1
     end
 
     test 'level offset should be added to discrete heading' do
       input = <<~'EOS'
-      = Master Document
+      = Main Document
       Doc Writer
 
       :leveloffset: 1
@@ -1302,10 +1347,10 @@ context 'Sections' do
 
     test 'should be able to reset level offset' do
       input = <<~'EOS'
-      = Master Document
+      = Main Document
       Doc Writer
 
-      Master preamble.
+      Main preamble.
 
       :leveloffset: 1
 
@@ -1325,10 +1370,10 @@ context 'Sections' do
 
     test 'should add relative offset value to current leveloffset' do
       input = <<~'EOS'
-      = Master Document
+      = Main Document
       Doc Writer
 
-      Master preamble.
+      Main preamble.
 
       :leveloffset: 1
 
@@ -2648,9 +2693,9 @@ context 'Sections' do
       Abstract content
       EOS
 
-      output = convert_string_to_embedded input, backend: 'docbook'
-      assert_xpath '/abstract[@xml:id="abstract_title"]', output, 1
-      assert_xpath '/abstract[@xml:id="abstract_title"]/title[text()="Abstract Title"]', output, 1
+      output = convert_string input, backend: 'docbook'
+      assert_xpath '/article/info/abstract[@xml:id="abstract_title"]', output, 1
+      assert_xpath '/article/info/abstract[@xml:id="abstract_title"]/title[text()="Abstract Title"]', output, 1
     end
 
     test 'should allow a special section to be nested at arbitrary depth in DocBook output' do
@@ -2681,17 +2726,19 @@ context 'Sections' do
       assert_xpath '//glossary/glossentry', output, 2
     end
 
-    test 'should drop title on special section in DocBook output if untitled option is set' do
-      input = <<~'EOS'
-      [dedication%untitled]
-      == Dedication
+    test 'should drop title on special section in DocBook output if notitle or untitled option is set' do
+      %w(notitle untitled).each do |option|
+        input = <<~EOS
+        [dedication%#{option}]
+        == Dedication
 
-      content
-      EOS
+        content
+        EOS
 
-      output = convert_string_to_embedded input, backend: :docbook
-      assert_xpath '/dedication', output, 1
-      assert_xpath '/dedication/title', output, 0
+        output = convert_string_to_embedded input, backend: :docbook
+        assert_xpath '/dedication', output, 1
+        assert_xpath '/dedication/title', output, 0
+      end
     end
   end
 
@@ -3520,6 +3567,8 @@ context 'Sections' do
       assert_xpath '//h1[@id="_chapter_one"][text() = "Chapter One"]', output, 1
       assert_xpath '//h1[@id="_chapter_two"][text() = "Chapter Two"]', output, 1
       assert_xpath '//h1[@id="_chapter_three"][text() = "Chapter Three"]', output, 1
+      assert_css '#_chapter_one + .openblock.partintro p', output, 1
+      assert_css '#_chapter_two + .openblock.partintro p', output, 1
     end
 
     test 'should print error if level 0 section comes after nested section and doctype is not book' do
@@ -3596,6 +3645,31 @@ context 'Sections' do
       assert_equal 'section', (doc.find_by id: 'appendix-section-title')[0].sectname
     end
 
+    test 'should allow part intro to be defined using special section' do
+      input = <<~'EOS'
+      = Book
+      :doctype: book
+
+      = Part 1
+
+      [partintro]
+      == Part Intro
+
+      Part intro content
+
+      == Chapter 1
+
+      Chapter content
+      EOS
+
+      output = convert_string input, backend: 'docbook'
+      assert_xpath '/book/part[@xml:id="_part_1"]', output, 1
+      assert_xpath '/book/part[@xml:id="_part_1"]/partintro', output, 1
+      assert_xpath '/book/part[@xml:id="_part_1"]/partintro[@xml:id="_part_intro"]', output, 1
+      assert_xpath '/book/part[@xml:id="_part_1"]/partintro[@xml:id="_part_intro"]/title[text()="Part Intro"]', output, 1
+      assert_xpath '/book/part[@xml:id="_part_1"]/partintro[@xml:id="_part_intro"]/following-sibling::chapter[@xml:id="_chapter_1"]', output, 1
+    end
+
     test 'should add partintro style to child paragraph of part' do
       input = <<~'EOS'
       = Book
@@ -3603,7 +3677,7 @@ context 'Sections' do
 
       = Part 1
 
-      part intro
+      part intro--a summary
 
       == Chapter 1
       EOS
@@ -3611,7 +3685,53 @@ context 'Sections' do
       doc = document_from_string input
       partintro = doc.blocks.first.blocks.first
       assert_equal :open, partintro.context
+      assert_equal :compound, partintro.content_model
+      assert_empty partintro.lines
+      assert_empty partintro.subs
       assert_equal 'partintro', partintro.style
+      assert_equal :paragraph, partintro.blocks[0].context
+      assert_equal ['part intro--a summary'], partintro.blocks[0].lines
+      assert_include 'part intro&#8212;&#8203;a summary', partintro.convert
+    end
+
+    test 'should preserve title on partintro defined as partintro paragraph' do
+      input = <<~'EOS'
+      = Book
+      :doctype: book
+
+      = Part 1
+
+      .Intro
+      [partintro]
+      Read this first.
+
+      == Chapter 1
+      EOS
+
+      doc = document_from_string input
+      partintro = doc.blocks.first.blocks.first
+      assert_equal :open, partintro.context
+      assert_equal 'Intro', partintro.title
+    end
+
+    test 'should not promote title on partintro defined as normal paragraph' do
+      input = <<~'EOS'
+      = Book
+      :doctype: book
+
+      = Part 1
+
+      .Intro
+      Read this first.
+
+      == Chapter 1
+      EOS
+
+      doc = document_from_string input
+      partintro = doc.blocks.first.blocks.first
+      assert_equal :open, partintro.context
+      assert_nil partintro.title
+      assert_equal 'Intro', partintro.blocks[0].title
     end
 
     test 'should add partintro style to child open block of part' do
@@ -3631,7 +3751,9 @@ context 'Sections' do
       doc = document_from_string input
       partintro = doc.blocks.first.blocks.first
       assert_equal :open, partintro.context
+      assert_equal :compound, partintro.content_model
       assert_equal 'partintro', partintro.style
+      assert_equal :paragraph, partintro.blocks[0].context
     end
 
     test 'should wrap child paragraphs of part in partintro open block' do
@@ -3651,10 +3773,55 @@ context 'Sections' do
       doc = document_from_string input
       partintro = doc.blocks.first.blocks.first
       assert_equal :open, partintro.context
+      assert_equal :compound, partintro.content_model
       assert_equal 'partintro', partintro.style
       assert_equal 2, partintro.blocks.size
       assert_equal :paragraph, partintro.blocks[0].context
       assert_equal :paragraph, partintro.blocks[1].context
+    end
+
+    test 'should wrap abstract in implicit part intro in info tag when converting to DocBook' do
+      input = <<~'EOS'
+      = Book
+      :doctype: book
+
+      = Part 1
+
+      [abstract]
+      Abstract of part.
+
+      more part intro
+
+      == Chapter 1
+      EOS
+
+      output = convert_string input, backend: 'docbook'
+      assert_xpath '//abstract', output, 1
+      assert_xpath '//partintro/info/abstract', output, 1
+    end
+
+    test 'should wrap abstract in part intro section in info tag when converting to DocBook' do
+      input = <<~'EOS'
+      = Book
+      :doctype: book
+
+      = Part 1
+
+      [partintro]
+      == Part Intro
+
+      [abstract]
+      Abstract of part.
+
+      more part intro
+
+      == Chapter 1
+      EOS
+
+      output = convert_string input, backend: 'docbook'
+      assert_xpath '//abstract', output, 1
+      assert_xpath '//partintro/info/abstract', output, 1
+      assert_xpath '//partintro/simpara', output, 1
     end
 
     test 'should warn if part has no sections' do

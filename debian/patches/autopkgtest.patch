@@ -1,0 +1,61 @@
+Description: Fix tests under autopkgtest
+Author: Antonio Terceiro <terceiro@debian.org>
+Origin: vendor
+Forwarded: not-needed
+Last-Update: 2022-12-26
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+--- a/test/invoker_test.rb
++++ b/test/invoker_test.rb
+@@ -1,6 +1,6 @@
+ # frozen_string_literal: false
+ require_relative 'test_helper'
+-require File.join Asciidoctor::LIB_DIR, 'asciidoctor/cli'
++require 'asciidoctor/cli'
+ 
+ context 'Invoker' do
+   test 'should allow Options to be passed as first argument of constructor' do
+--- a/test/options_test.rb
++++ b/test/options_test.rb
+@@ -1,6 +1,6 @@
+ # frozen_string_literal: true
+ require_relative 'test_helper'
+-require File.join Asciidoctor::LIB_DIR, 'asciidoctor/cli/options'
++require 'asciidoctor/cli/options'
+ 
+ context 'Options' do
+   test 'should print usage and return error code 0 when help flag is present' do
+--- a/test/test_helper.rb
++++ b/test/test_helper.rb
+@@ -4,8 +4,7 @@ ASCIIDOCTOR_LIB_DIR = ENV['ASCIIDOCTOR_L
+ 
+ require 'simplecov' if ENV['COVERAGE'] == 'true'
+ 
+-require File.join ASCIIDOCTOR_LIB_DIR, 'asciidoctor'
+-Dir.chdir Asciidoctor::ROOT_DIR
++require 'asciidoctor'
+ 
+ require 'nokogiri'
+ # NOTE rouge has all sorts of warnings we don't want to see, so silence them
+--- a/features/step_definitions.rb
++++ b/features/step_definitions.rb
+@@ -5,8 +5,7 @@ ASCIIDOCTOR_LIB_DIR = ENV['ASCIIDOCTOR_L
+ 
+ require 'simplecov' if ENV['COVERAGE'] == 'true'
+ 
+-require File.join ASCIIDOCTOR_LIB_DIR, 'asciidoctor'
+-Dir.chdir Asciidoctor::ROOT_DIR
++require 'asciidoctor'
+ 
+ require 'minitest'
+ require 'tilt'
+--- a/test/converter_test.rb
++++ b/test/converter_test.rb
+@@ -1,6 +1,7 @@
+ # frozen_string_literal: true
+ require_relative 'test_helper'
+ require 'tilt' unless defined? Tilt.new
++require 'uri'
+ 
+ context 'Converter' do
+   context 'View options' do
