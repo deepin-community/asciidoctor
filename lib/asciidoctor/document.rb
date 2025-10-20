@@ -198,7 +198,7 @@ class Document < AbstractBlock
   # Public: Get the document catalog Hash
   attr_reader :catalog
 
-  # Public: Alias catalog property as references for backwards compatiblity
+  # Public: Alias catalog property as references for backwards compatibility
   alias references catalog
 
   # Public: Get the Hash of document counters
@@ -257,6 +257,7 @@ class Document < AbstractBlock
       @parent_document = parent_doc
       options[:base_dir] ||= parent_doc.base_dir
       options[:catalog_assets] = true if parent_doc.options[:catalog_assets]
+      options[:to_dir] = parent_doc.options[:to_dir] if parent_doc.options[:to_dir]
       @catalog = parent_doc.catalog.merge footnotes: []
       # QUESTION should we support setting attribute in parent document from nested document?
       @attribute_overrides = attr_overrides = (parent_doc.instance_variable_get :@attribute_overrides).merge parent_doc.attributes
@@ -328,7 +329,7 @@ class Document < AbstractBlock
       @timings = options.delete :timings
       @path_resolver = PathResolver.new
       initialize_extensions = (defined? ::Asciidoctor::Extensions) || (options.key? :extensions) ? ::Asciidoctor::Extensions : nil
-      @extensions = nil # initialize furthur down if initialize_extensions is true
+      @extensions = nil # initialize further down if initialize_extensions is true
       options[:standalone] = options[:header_footer] if (options.key? :header_footer) && !(options.key? :standalone)
     end
 
@@ -629,6 +630,13 @@ class Document < AbstractBlock
       @reftexts = nil
       resolved_id
     end
+  end
+
+  # Public: Check whether this Document has any child Section objects.
+  #
+  # Returns A [Boolean] to indicate whether this Document has child Section objects
+  def sections?
+    @next_section_index > 0
   end
 
   def footnotes?
@@ -965,8 +973,14 @@ class Document < AbstractBlock
 
   # Public: Write the output to the specified file
   #
-  # If the converter responds to :write, delegate the work of writing the file
-  # to that method. Otherwise, write the output the specified file.
+  # If the converter responds to :write, delegate the work of writing the output
+  # to that method. Otherwise, write the output to the specified file. In the
+  # latter case, this method ensures the output has a trailing newline if the
+  # target responds to write and the output is not empty.
+  #
+  # output - The output to write. Unless the converter responds to write, this
+  #          object is expected to be a String.
+  # target - The file to write, either a File object or a String path.
   #
   # Returns nothing
   def write output, target

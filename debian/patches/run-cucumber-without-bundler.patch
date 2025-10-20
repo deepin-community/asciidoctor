@@ -6,11 +6,9 @@ Subject: Run cucumber without bundler
  tasks/cucumber.rake | 1 +
  1 file changed, 1 insertion(+)
 
-diff --git a/tasks/cucumber.rake b/tasks/cucumber.rake
-index 8237597..aef5dab 100644
 --- a/tasks/cucumber.rake
 +++ b/tasks/cucumber.rake
-@@ -4,6 +4,7 @@ begin
+@@ -4,6 +4,7 @@
    Cucumber::Rake::Task.new :features do |t|
      t.cucumber_opts = %w(-f progress)
      t.cucumber_opts << '--no-color' if ENV['CI']

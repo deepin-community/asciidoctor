@@ -1074,6 +1074,121 @@ context 'Document' do
       assert_xpath '(/article/info/authorgroup/author)[2]/personname/firstname[text()="Junior"]', output, 1
     end
 
+    test 'should process author defined by attribute when implicit doctitle is absent' do
+      input = <<~'EOS'
+      :author: Doc Writer
+
+      {lastname}, {firstname} ({authorinitials})
+      EOS
+
+      doc = document_from_string input, standalone: false
+      assert_equal 'Doc Writer', (doc.attr 'author')
+      assert_nil (doc.attr 'author_1')
+      assert_equal 'Writer', (doc.attr 'lastname')
+      assert_equal 'Doc', (doc.attr 'firstname')
+      assert_equal 'DW', (doc.attr 'authorinitials')
+      assert_equal 1, (doc.attr 'authorcount')
+      output = doc.convert
+      assert_xpath '//p[text()="Writer, Doc (DW)"]', output, 1
+    end
+
+    test 'should process author and authorinitials defined by attribute when implicit doctitle is absent' do
+      input = <<~'EOS'
+      :authorinitials: DOC
+      :author: Doc Writer
+
+      {lastname}, {firstname} ({authorinitials})
+      EOS
+
+      doc = document_from_string input, standalone: false
+      assert_equal 'Doc Writer', (doc.attr 'author')
+      assert_equal 'DOC', (doc.attr 'authorinitials')
+      assert_equal 1, (doc.attr 'authorcount')
+      output = doc.convert
+      assert_xpath '//p[text()="Writer, Doc (DOC)"]', output, 1
+    end
+
+    test 'should process authors defined by attribute when implicit doctitle is absent' do
+      input = <<~'EOS'
+      :authors: Doc Writer; Other Author
+
+      {lastname}, {firstname} ({authorinitials})
+      EOS
+
+      doc = document_from_string input, standalone: false
+      assert_equal 'Doc Writer', (doc.attr 'author')
+      assert_equal 'Doc Writer, Other Author', (doc.attr 'authors')
+      assert_equal 'Doc Writer', (doc.attr 'author_1')
+      assert_equal 'Writer', (doc.attr 'lastname')
+      assert_equal 'Writer', (doc.attr 'lastname_1')
+      assert_equal 'Doc', (doc.attr 'firstname')
+      assert_equal 'Doc', (doc.attr 'firstname_1')
+      assert_equal 'DW', (doc.attr 'authorinitials')
+      assert_equal 'DW', (doc.attr 'authorinitials_1')
+      assert_equal 'Other Author', (doc.attr 'author_2')
+      assert_equal 'OA', (doc.attr 'authorinitials_2')
+      assert_equal 2, (doc.attr 'authorcount')
+      output = doc.convert
+      assert_xpath '//p[text()="Writer, Doc (DW)"]', output, 1
+    end
+
+    test 'should process authors and authorinitials defined by attribute when implicit doctitle is absent' do
+      input = <<~'EOS'
+      :authorinitials: DOC
+      :authors: Doc Writer; Other Author
+
+      {lastname}, {firstname} ({authorinitials})
+      EOS
+
+      doc = document_from_string input, standalone: false
+      assert_equal 'Doc Writer', (doc.attr 'author')
+      assert_equal 'Doc Writer', (doc.attr 'author_1')
+      # FIXME this should be supported, but isn't yet
+      #assert_equal 'DOC', (doc.attr 'authorinitials')
+      assert_equal 'DW', (doc.attr 'authorinitials')
+      assert_equal 'Other Author', (doc.attr 'author_2')
+      assert_equal 2, (doc.attr 'authorcount')
+      output = doc.convert
+      #assert_xpath '//p[text()="Writer, Doc (DOC)"]', output, 1
+      assert_xpath '//p[text()="Writer, Doc (DW)"]', output, 1
+    end
+
+    test 'should set authorcount to 0 if document has no header' do
+      doc = document_from_string 'content'
+      assert_equal 0, (doc.attr 'authorcount')
+    end
+
+    test 'should set authorcount to 0 if author not set by attribute and implicit doctitle is missing' do
+      input = <<~'EOS'
+      :idprefix:
+
+      == Section Title
+
+      content
+      EOS
+      doc = document_from_string input
+      assert_equal 0, (doc.attr 'authorcount')
+    end
+
+    test 'should set authorcount to 0 if author not set by attribute and document starts with level-0 section with style' do
+      input = <<~'EOS'
+      :doctype: book
+
+      [preface]
+      = Preface
+
+      content
+
+      = Part
+
+      == Chapter
+
+      content
+      EOS
+      doc = document_from_string input
+      assert_equal 0, (doc.attr 'authorcount')
+    end
+
     test 'with author defined by indexed attribute name' do
       input = <<~'EOS'
       = Document Title
@@ -1316,6 +1431,47 @@ context 'Document' do
       assert_equal 'bar', doc.attributes['foo']
       # there would be at least 1 block had it parsed beyond the header
       assert_equal 0, doc.blocks.size
+    end
+
+    test 'should parse header only when docytpe is manpage' do
+      input = <<~'EOS'
+      = cmd(1)
+      Author Name
+      :doctype: manpage
+
+      == Name
+
+      cmd - does stuff
+      EOS
+
+      doc = document_from_string input, parse_header_only: true
+      assert_equal 'cmd(1)', doc.doctitle
+      assert_equal 'Author Name', doc.author
+      assert_equal 'cmd', doc.attributes['mantitle']
+      assert_equal '1', doc.attributes['manvolnum']
+      assert_nil doc.attributes['manname']
+      assert_nil doc.attributes['manpurpose']
+      assert_equal 0, doc.blocks.size
+    end
+
+    test 'should not warn when parsing header only when docytpe is manpage and body is empty' do
+      input = <<~'EOS'
+      = cmd(1)
+      Author Name
+      :doctype: manpage
+      EOS
+
+      using_memory_logger do |logger|
+        doc = document_from_string input, parse_header_only: true
+        assert_empty logger.messages
+        assert_equal 'cmd(1)', doc.doctitle
+        assert_equal 'Author Name', doc.author
+        assert_equal 'cmd', doc.attributes['mantitle']
+        assert_equal '1', doc.attributes['manvolnum']
+        assert_nil doc.attributes['manname']
+        assert_nil doc.attributes['manpurpose']
+        assert_equal 0, doc.blocks.size
+      end
     end
 
     test 'outputs footnotes in footer' do
@@ -1615,23 +1771,24 @@ context 'Document' do
 
       section body
       EOS
-      result = convert_string(input, keep_namespaces: true, attributes: { 'backend' => 'docbook5', 'doctype' => 'manpage' })
-      assert_xpath '/xmlns:refentry', result, 1
-      doc = xmlnodes_at_xpath('/xmlns:refentry', result, 1)
+      result = convert_string input, keep_namespaces: true, attributes: { 'backend' => 'docbook5', 'doctype' => 'manpage' }
+      assert_xpath '/xmlns:article', result, 1
+      assert_xpath '/xmlns:article/xmlns:refentry', result, 1
+      doc = xmlnodes_at_xpath '/xmlns:article', result, 1
       assert_equal 'http://docbook.org/ns/docbook', doc.namespaces['xmlns']
       assert_equal 'http://www.w3.org/1999/xlink', doc.namespaces['xmlns:xl']
-      assert_xpath '/xmlns:refentry[@version="5.0"]', result, 1
-      assert_xpath '/xmlns:refentry/xmlns:info/xmlns:title[text()="asciidoctor(1)"]', result, 1
-      assert_xpath '/xmlns:refentry/xmlns:refmeta/xmlns:refentrytitle[text()="asciidoctor"]', result, 1
-      assert_xpath '/xmlns:refentry/xmlns:refmeta/xmlns:manvolnum[text()="1"]', result, 1
-      assert_xpath '/xmlns:refentry/xmlns:refmeta/xmlns:refmiscinfo[@class="source"][text()="Asciidoctor"]', result, 1
-      assert_xpath '/xmlns:refentry/xmlns:refmeta/xmlns:refmiscinfo[@class="manual"][text()="Asciidoctor Manual"]', result, 1
-      assert_xpath '/xmlns:refentry/xmlns:refnamediv/xmlns:refname[text()="asciidoctor"]', result, 1
-      assert_xpath '/xmlns:refentry/xmlns:refnamediv/xmlns:refpurpose[text()="Process text"]', result, 1
-      assert_xpath '/xmlns:refentry/xmlns:refsynopsisdiv', result, 1
-      assert_xpath '/xmlns:refentry/xmlns:refsynopsisdiv/xmlns:simpara[text()="some text"]', result, 1
-      assert_xpath '/xmlns:refentry/xmlns:refsection', result, 1
-      assert_css 'refentry:root > refsection[xml|id="_first_section"]', result, 1
+      assert_equal '5.0', (doc.attr 'version')
+      assert_xpath '/xmlns:article/xmlns:info/xmlns:title[text()="asciidoctor(1)"]', result, 1
+      assert_xpath '/xmlns:article/xmlns:refentry/xmlns:refmeta/xmlns:refentrytitle[text()="asciidoctor"]', result, 1
+      assert_xpath '/xmlns:article/xmlns:refentry/xmlns:refmeta/xmlns:manvolnum[text()="1"]', result, 1
+      assert_xpath '/xmlns:article/xmlns:refentry/xmlns:refmeta/xmlns:refmiscinfo[@class="source"][text()="Asciidoctor"]', result, 1
+      assert_xpath '/xmlns:article/xmlns:refentry/xmlns:refmeta/xmlns:refmiscinfo[@class="manual"][text()="Asciidoctor Manual"]', result, 1
+      assert_xpath '/xmlns:article/xmlns:refentry/xmlns:refnamediv/xmlns:refname[text()="asciidoctor"]', result, 1
+      assert_xpath '/xmlns:article/xmlns:refentry/xmlns:refnamediv/xmlns:refpurpose[text()="Process text"]', result, 1
+      assert_xpath '/xmlns:article/xmlns:refentry/xmlns:refsynopsisdiv', result, 1
+      assert_xpath '/xmlns:article/xmlns:refentry/xmlns:refsynopsisdiv/xmlns:simpara[text()="some text"]', result, 1
+      assert_xpath '/xmlns:article/xmlns:refentry/xmlns:refsection', result, 1
+      assert_css 'article:root > refentry > refsection[xml|id="_first_section"]', result, 1
     end
 
     test 'should output non-breaking space for source and manual in docbook manpage output if absent from source' do
@@ -1646,9 +1803,29 @@ context 'Document' do
 
       some text
       EOS
-      result = convert_string(input, keep_namespaces: true, attributes: { 'backend' => 'docbook5', 'doctype' => 'manpage' })
-      assert_xpath %(/xmlns:refentry/xmlns:refmeta/xmlns:refmiscinfo[@class="source"][text()="#{decode_char 160}"]), result, 1
-      assert_xpath %(/xmlns:refentry/xmlns:refmeta/xmlns:refmiscinfo[@class="manual"][text()="#{decode_char 160}"]), result, 1
+      result = convert_string input, keep_namespaces: true, attributes: { 'backend' => 'docbook5', 'doctype' => 'manpage' }
+      assert_xpath %(/xmlns:article/xmlns:refentry/xmlns:refmeta/xmlns:refmiscinfo[@class="source"][text()="#{decode_char 160}"]), result, 1
+      assert_xpath %(/xmlns:article/xmlns:refentry/xmlns:refmeta/xmlns:refmiscinfo[@class="manual"][text()="#{decode_char 160}"]), result, 1
+    end
+
+    test 'should apply replacements substitution to value of mantitle attribute used in DocBook output' do
+      input = <<~'EOS'
+      = foo\--bar(1)
+      Author Name
+      :doctype: manpage
+      :man manual: Foo Bar Manual
+      :man source: Foo Bar 1.0
+
+      == NAME
+
+      foo--bar - puts the foo in your bar
+      EOS
+
+      doc = Asciidoctor.load input, backend: :docbook, standalone: true
+      assert_equal 'foo\\--bar', (doc.attr 'mantitle')
+      result = doc.convert
+      assert_xpath '/xmlns:article/xmlns:info/xmlns:title[text()="foo--bar(1)"]', result, 1
+      assert_xpath '/xmlns:article/xmlns:refentry/xmlns:refmeta/xmlns:refentrytitle[text()="foo--bar"]', result, 1
     end
 
     test 'should be able to set doctype to book when converting to DocBook' do
@@ -1701,9 +1878,9 @@ context 'Document' do
       EOS
 
       result = convert_string input, backend: 'docbook5'
-      assert_xpath '/refentry/refnamediv/refname', result, 2
-      assert_xpath '(/refentry/refnamediv/refname)[1][text()="eve"]', result, 1
-      assert_xpath '(/refentry/refnamediv/refname)[2][text()="islifeform"]', result, 1
+      assert_xpath '/article/refentry/refnamediv/refname', result, 2
+      assert_xpath '(/article/refentry/refnamediv/refname)[1][text()="eve"]', result, 1
+      assert_xpath '(/article/refentry/refnamediv/refname)[2][text()="islifeform"]', result, 1
     end
 
     test 'adds a front and back cover image to DocBook 5 when doctype is book' do

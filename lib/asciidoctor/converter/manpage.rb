@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 module Asciidoctor
-# A built-in {Converter} implementation that generates the man page (troff) format.
+# A built-in {Converter} implementation that generates the man page (groff) format.
 #
 # The output of this converter adheres to the man definition as defined by
 # groff and uses the manpage output of the DocBook toolchain as a foundation.
@@ -28,7 +28,7 @@ class Converter::ManPageConverter < Converter::Base
   EllipsisCharRefRx = /&#8230;(?:&#8203;)?/
   WrappedIndentRx = /#{CG_BLANK}*#{LF}#{CG_BLANK}*/
   XMLMarkupRx = /&#?[a-z\d]+;|</
-  PCDATAFilterRx = /(&#?[a-z\d]+;|<[^>]+>)|([^&<]+)/
+  PCDATAFilterRx = %r((&#?[a-z\d]+;|<#{ESC}\\f\(CR.*?</#{ESC}\\fP>|<[^>]+>)|([^&<]+))
 
   def initialize backend, opts = {}
     @backend = backend
@@ -39,7 +39,7 @@ class Converter::ManPageConverter < Converter::Base
     unless node.attr? 'mantitle'
       raise 'asciidoctor: ERROR: doctype must be set to manpage when using manpage backend'
     end
-    mantitle = node.attr 'mantitle'
+    mantitle = (node.attr 'mantitle').gsub InvalidSectionIdCharsRx, ''
     manvolnum = node.attr 'manvolnum', '1'
     manname = node.attr 'manname', mantitle
     manmanual = node.attr 'manmanual'
@@ -236,7 +236,7 @@ r lw(\n(.lu*75u/100u).'
     result << (node.title? ? %(.sp
 .B #{manify node.captioned_title}
 .br) : '.sp')
-    result << %([#{node.alt}])
+    result << %([#{manify node.alt}])
     result.join LF
   end
 
@@ -432,7 +432,7 @@ allbox tab(:);'
             when :literal
               cell_content = %(.nf#{LF}#{manify cell.text, whitespace: :preserve}#{LF}.fi)
             else
-              cell_content = manify cell.content.join, whitespace: :normalize
+              cell_content = cell.content.map {|p| manify p, whitespace: :normalize }.join %(#{LF}.sp#{LF})
             end
             row_text[row_index] << %(#{cell_content}#{LF})
           else # tsec == :head || tsec == :foot
@@ -476,21 +476,14 @@ allbox tab(:);'
       end unless rows.empty?
     end
 
-    #row_header.each do |row|
-    #  result << LF
-    #  row.each_with_index do |cell, i|
-    #    result << (cell.join ' ')
-    #    result << ' ' if row.size > i + 1
-    #  end
-    #end
-    # FIXME temporary fix to get basic table to display
-    result << LF
-    result << ('lt ' * row_header[0].size).chop
-
-    result << %(.#{LF})
-    row_text.each do |row|
-      result << row.join
+    if node.has_header_option && (header_row_text = row_text[0])
+      result << %(#{LF}#{row_header[0].join ' '}.)
+      result << %(#{LF}#{header_row_text.join})
+      result << '.T&'
+      row_text = row_text.slice 1, row_text.length
     end
+    result << %(#{LF}#{row_header[0].map { 'lt' }.join ' '}.#{LF})
+    row_text.each {|row| result << row.join }
     result << %(.TE#{LF}.sp)
     result.join
   end
@@ -706,46 +699,44 @@ allbox tab(:);'
   def manify str, opts = {}
     case opts.fetch :whitespace, :collapse
     when :preserve
-      str = str.gsub TAB, ET
+      str = (str.gsub TAB, ET).gsub(/(^)?  +/) { $1 ? $& : %(#{ESC_BS}&#{$&}) }
     when :normalize
       str = str.gsub WrappedIndentRx, LF
     else
       str = str.tr_s WHITESPACE, ' '
     end
-    str = str
-      .gsub(LiteralBackslashRx) { $1 ? $& : '\\(rs' } # literal backslash (not a troff escape sequence)
-      .gsub(EllipsisCharRefRx, '...') # horizontal ellipsis
-      .gsub(LeadingPeriodRx, '\\\&.') # leading . is used in troff for macro call or other formatting; replace with \&.
-      .gsub(EscapedMacroRx) do # drop orphaned \c escape lines, unescape troff macro, quote adjacent character, isolate macro line
-        (rest = $3.lstrip).empty? ? %(.#{$1}"#{$2}") : %(.#{$1}"#{$2.rstrip}"#{LF}#{rest})
-      end
-      .gsub('-', '\-')
-      .gsub('&lt;', '<')
-      .gsub('&gt;', '>')
-      .gsub('&#43;', '+')       # plus sign; alternately could use \c(pl
-      .gsub('&#160;', '\~')     # non-breaking space
-      .gsub('&#169;', '\(co')   # copyright sign
-      .gsub('&#174;', '\(rg')   # registered sign
-      .gsub('&#8482;', '\(tm')  # trademark sign
-      .gsub('&#176;', '\(de')   # degree sign
-      .gsub('&#8201;', ' ')     # thin space
-      .gsub('&#8211;', '\(en')  # en dash
-      .gsub(EmDashCharRefRx, '\(em') # em dash
-      .gsub('&#8216;', '\(oq')  # left single quotation mark
-      .gsub('&#8217;', '\(cq')  # right single quotation mark
-      .gsub('&#8220;', '\(lq')  # left double quotation mark
-      .gsub('&#8221;', '\(rq')  # right double quotation mark
-      .gsub('&#8592;', '\(<-')  # leftwards arrow
-      .gsub('&#8594;', '\(->')  # rightwards arrow
-      .gsub('&#8656;', '\(lA')  # leftwards double arrow
-      .gsub('&#8658;', '\(rA')  # rightwards double arrow
-      .gsub('&#8203;', '\:')    # zero width space
-      .gsub('&amp;', '&')       # literal ampersand (NOTE must take place after any other replacement that includes &)
-      .gsub('\'', '\*(Aq')      # apostrophe / neutral single quote
-      .gsub(MockMacroRx, '\1')  # mock boundary
-      .gsub(ESC_BS, '\\')       # unescape troff backslash (NOTE update if more escapes are added)
-      .gsub(ESC_FS, '.')        # unescape full stop in troff commands (NOTE must take place after gsub(LeadingPeriodRx))
-      .rstrip                   # strip trailing space
+    str = str.
+      gsub(LiteralBackslashRx) { $1 ? $& : '\\(rs' }. # literal backslash (not a troff escape sequence)
+      gsub(EllipsisCharRefRx, '...'). # horizontal ellipsis
+      gsub(LeadingPeriodRx, '\\\&.'). # leading . is used in troff for macro call or other formatting; replace with \&.
+      gsub(EscapedMacroRx) { (rest = $3.lstrip).empty? ? %(.#{$1}"#{$2}") : %(.#{$1}"#{$2.rstrip}"#{LF}#{rest}) }. # drop orphaned \c escape lines, unescape troff macro, quote adjacent character, isolate macro line
+      gsub('-', '\-').
+      gsub('&lt;', '<').
+      gsub('&gt;', '>').
+      gsub('&#43;', '+').      # plus sign; alternately could use \c(pl
+      gsub('&#160;', '\~').    # non-breaking space
+      gsub('&#169;', '\(co').  # copyright sign
+      gsub('&#174;', '\(rg').  # registered sign
+      gsub('&#8482;', '\(tm'). # trademark sign
+      gsub('&#176;', '\(de').  # degree sign
+      gsub('&#8201;', ' ').    # thin space
+      gsub('&#8211;', '\(en'). # en dash
+      gsub(EmDashCharRefRx, '\(em'). # em dash
+      gsub('&#8216;', '\(oq'). # left single quotation mark
+      gsub('&#8217;', '\(cq'). # right single quotation mark
+      gsub('&#8220;', '\(lq'). # left double quotation mark
+      gsub('&#8221;', '\(rq'). # right double quotation mark
+      gsub('&#8592;', '\(<-'). # leftwards arrow
+      gsub('&#8594;', '\(->'). # rightwards arrow
+      gsub('&#8656;', '\(lA'). # leftwards double arrow
+      gsub('&#8658;', '\(rA'). # rightwards double arrow
+      gsub('&#8203;', '\:').   # zero width space
+      gsub('&amp;', '&').      # literal ampersand (NOTE must take place after any other replacement that includes &)
+      gsub('\'', '\*(Aq').     # apostrophe / neutral single quote
+      gsub(MockMacroRx, '\1'). # mock boundary
+      gsub(ESC_BS, '\\').      # unescape troff backslash (NOTE update if more escapes are added)
+      gsub(ESC_FS, '.').       # unescape full stop in troff commands (NOTE must take place after gsub(LeadingPeriodRx))
+      rstrip                   # strip trailing space
     opts[:append_newline] ? %(#{str}#{LF}) : str
   end
 

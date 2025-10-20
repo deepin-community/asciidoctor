@@ -145,6 +145,14 @@ context 'Options' do
     assert_nil options[:attributes]
   end
 
+  test 'should gracefully force encoding to UTF-8 if encoding on string is mislabeled' do
+    args = ['-a', ((%w(platform-name 云平台).join '=').force_encoding Encoding::ASCII_8BIT), '-']
+    options = Asciidoctor::Cli::Options.parse! args
+
+    assert_equal '云平台', options[:attributes]['platform-name']
+    assert_equal Encoding::UTF_8, options[:attributes]['platform-name'].encoding
+  end
+
   test 'should allow safe mode to be specified' do
     options = Asciidoctor::Cli::Options.parse!(%w(-S safe test/fixtures/sample.adoc))
     assert_equal Asciidoctor::SafeMode::SAFE, options[:safe]
@@ -241,17 +249,24 @@ context 'Options' do
     assert_equal ::Logger::Severity::FATAL, options[:failure_level]
   end
 
-  test 'should allow failure level to be set to WARN' do
-    %w(w warn WARN warning WARNING).each do |val|
-      options = Asciidoctor::Cli::Options.parse!(%W(--failure-level=#{val} test/fixtures/sample.adoc))
-      assert_equal ::Logger::Severity::WARN, options[:failure_level]
+  test 'should allow failure level to be set to FATAL using any recognized abbreviation' do
+    %w(f fatal FATAL).each do |val|
+      options = Asciidoctor::Cli::Options.parse! %W(--failure-level=#{val} test/fixtures/sample.adoc)
+      assert_equal ::Logger::Severity::FATAL, options[:failure_level]
     end
   end
 
-  test 'should allow failure level to be set to ERROR' do
+  test 'should allow failure level to be set to ERROR using any recognized abbreviation' do
     %w(e err ERR error ERROR).each do |val|
       options = Asciidoctor::Cli::Options.parse!(%W(--failure-level=#{val} test/fixtures/sample.adoc))
       assert_equal ::Logger::Severity::ERROR, options[:failure_level]
+    end
+  end
+
+  test 'should allow failure level to be set to WARN using any recognized abbreviation' do
+    %w(w warn WARN warning WARNING).each do |val|
+      options = Asciidoctor::Cli::Options.parse! %W(--failure-level=#{val} test/fixtures/sample.adoc)
+      assert_equal ::Logger::Severity::WARN, options[:failure_level]
     end
   end
 
